@@ -1,5 +1,6 @@
-## v1.0.0 (major)
+## v1.0.1 (patch)
 
-- [patch] Run the git config tests outside any repository ([@matt-edmondson](https://github.com/matt-edmondson))
-- [minor] Scaffold ktsu.GitBranchStateCache ([@matt-edmondson](https://github.com/matt-edmondson))
+Changes since v1.0.0:
+
+- Bump the ktsu group with 2 updates ([@dependabot[bot]](https://github.com/dependabot[bot]))
 
