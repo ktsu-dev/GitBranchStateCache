@@ -1,6 +1,6 @@
 MIT License
 
-https://github.com/ktsu-dev/GitLfsCache
+https://github.com/ktsu-dev/GitBranchStateCache
 
 Copyright (c) 2023-2026 ktsu-dev contributors
 
