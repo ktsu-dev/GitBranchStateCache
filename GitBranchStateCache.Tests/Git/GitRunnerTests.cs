@@ -90,6 +90,7 @@ public class GitRunnerTests
 		GitResult result = await Build().RunAsync(
 			new GitInvocation
 			{
+				WorkingDirectory = OutsideAnyRepository(),
 				Arguments = ["config", "--list"],
 				CredentialScope = new Uri("https://github.com"),
 				Authorization = credential,
@@ -108,11 +109,38 @@ public class GitRunnerTests
 		// A helper configured for whoever this process runs as would be able to answer for a
 		// credential this service was never given, turning a refused request into a served one.
 		GitResult result = await Build().RunAsync(
-			new GitInvocation { Arguments = ["config", "--list"], Timeout = TimeSpan.FromSeconds(30) },
+			new GitInvocation
+			{
+				WorkingDirectory = OutsideAnyRepository(),
+				Arguments = ["config", "--list"],
+				Timeout = TimeSpan.FromSeconds(30),
+			},
 			CancellationToken.None);
 
 		Assert.DoesNotContain("extraheader", result.StandardOutput);
 		Assert.Contains("credential.helper=", result.StandardOutput);
+	}
+
+	/// <summary>
+	/// A directory that is not inside any git repository.
+	/// </summary>
+	/// <remarks>
+	/// The two tests above ask git what configuration it can see, so they have to run where the only
+	/// answer is the configuration this service supplied. Without a working directory the child
+	/// inherits the test process's, which under CI is the checked-out repository, and
+	/// <c>actions/checkout</c> writes its own <c>http.https://github.com/.extraheader</c> into that
+	/// repository's local config to carry the workflow token. The negative assertion then fails on a
+	/// header this service never sent.
+	/// <para>
+	/// Worth knowing beyond the test: repository-local configuration is the one layer a run is not
+	/// insulated from, and deliberately so, because a mirror's own config is what carries its fetch
+	/// refspec. It is only ever configuration this service wrote.
+	/// </para>
+	/// </remarks>
+	private static string OutsideAnyRepository()
+	{
+		Directory.CreateDirectory(TempRoot);
+		return TempRoot;
 	}
 
 	[TestMethod]

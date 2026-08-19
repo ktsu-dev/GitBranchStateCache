@@ -651,8 +651,3 @@ Temporary Items
 
 # ImGui.ini files
 imgui.ini
-
-# Design notes stay on disk next to the code but are deliberately not published. The branch state
-# cache design describes deployment topology and names an internal consumer, so it is kept local
-# rather than shipped with the repository.
-docs/superpowers/

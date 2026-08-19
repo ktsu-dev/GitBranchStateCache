@@ -21,11 +21,16 @@ using Microsoft.Extensions.Options;
 /// carrying userinfo, both of which put it on the command line.
 /// </para>
 /// <para>
-/// <strong>Nothing on the host can influence a run.</strong> System and global configuration are
-/// switched off, and any inherited <c>GIT_*</c> variable is dropped, so a credential helper, a proxy,
-/// or an alias configured for whoever the process runs as cannot change what git does here. A
-/// credential helper in particular would be able to answer for a credential this service was never
-/// given, which would turn a refused request into a served one.
+/// <strong>Nothing configured for the account this runs as can influence a run.</strong> System and
+/// global configuration are switched off, and any inherited <c>GIT_*</c> variable is dropped, so a
+/// credential helper, a proxy, or an alias configured for whoever the process runs as cannot change
+/// what git does here. A credential helper in particular would be able to answer for a credential
+/// this service was never given, which would turn a refused request into a served one.
+/// </para>
+/// <para>
+/// Repository-local configuration is the one layer left in play, deliberately: a mirror's own config
+/// is what carries its fetch refspec. That config is only ever what this service wrote when it
+/// created the mirror.
 /// </para>
 /// </remarks>
 /// <param name="options">The configured options.</param>
