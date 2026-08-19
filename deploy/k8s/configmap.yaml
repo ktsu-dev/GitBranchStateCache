@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitbranchstatecache-config
+  labels:
+    app.kubernetes.io/name: gitbranchstatecache
+data:
+  # Double underscore is the environment-variable form of a configuration section separator, so these
+  # map onto the same options the appsettings file binds.
+  GitBranchStateCache__MirrorRoot: /var/lib/gitbranchstatecache
+
+  # How old the mirror's refs may be before a request fetches. This is the freshness the plugin's
+  # thirty second heartbeat actually gets, and it must not exceed AdmissionTtl below, or branch state
+  # could outlive the authorization that permits reading it.
+  GitBranchStateCache__RefsTtl: "00:00:30"
+  GitBranchStateCache__AdmissionTtl: "00:01:00"
+
+  # A clone of a repository this service has never seen is the slow one; an incremental fetch is not.
+  GitBranchStateCache__FetchTimeout: "00:05:00"
+  GitBranchStateCache__DiffTimeout: "00:02:00"
+  GitBranchStateCache__ProbeTimeout: "00:00:30"
+
+  # How many computed diffs are kept. The ratio to watch is diff cache hits against misses: a low
+  # ratio means the team is spread across many integration points, and this is the number to raise.
+  GitBranchStateCache__MaxCachedDiffs: "2000"
+
+  # Bounds one response. A long-lived branch can differ in a hundred thousand paths, so a client that
+  # knows which assets it cares about should name them rather than omit the field.
+  GitBranchStateCache__MaxPathsPerRequest: "20000"
+
+  # An allow-listed repository that stops being queried would otherwise keep its mirror forever.
+  # Deleting one costs a clone if it is ever queried again. Set to 0 to keep every mirror.
+  GitBranchStateCache__MirrorIdleMaxAge: "30.00:00:00"
+  GitBranchStateCache__MaintenanceInterval: "01:00:00"
+
+  # One entry per upstream. The key is the path segment clients address after the version, so this
+  # upstream is reached at https://branch-state.example.com/v1/github/<owner>/<repo>.git/state
+  GitBranchStateCache__Upstreams__github__BaseUrl: https://github.com
+
+  # Required, and unlike the Git LFS proxy there is no pattern meaning every repository. Every entry
+  # must name at least one literal path segment, because one request for a repository not listed here
+  # would create a permanent mirror clone of it on this volume that nothing ever evicts.
+  GitBranchStateCache__Upstreams__github__Repositories__0: studio/game.git

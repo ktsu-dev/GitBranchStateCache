@@ -1,0 +1,10 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="GitBranchStateCache/GitBranchStateCache.csproj" />
+  <Project Path="GitBranchStateCache.Tool/GitBranchStateCache.Tool.csproj" />
+  <Project Path="GitBranchStateCache.Service/GitBranchStateCache.Service.csproj" />
+  <Project Path="GitBranchStateCache.Tests/GitBranchStateCache.Tests.csproj" />
+</Solution>

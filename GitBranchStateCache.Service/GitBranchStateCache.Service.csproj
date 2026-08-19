@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Sdk Name="ktsu.Sdk" />
+
+  <PropertyGroup>
+    <!-- The framework and output type are set here rather than by pulling in ktsu.Sdk.ConsoleApp. That
+         variant contributes exactly these two values, and this project already has to override the core
+         SDK's multi-framework default anyway, so the extra SDK dependency would buy nothing. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks></TargetFrameworks>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- This project exists only to be the container payload, separately from the tool project
+         because setting RuntimeIdentifiers on a PackAsTool project makes `dotnet pack` emit one
+         RID-specific tool package per entry alongside the real one, and nobody wants to install a
+         linux-arm64 dotnet tool.
+
+         Unlike ktsu.GitLfsCache, no RuntimeIdentifiers are set and the SDK's PublishContainer target
+         is not used. This service shells out to the git binary, which the SDK's container support
+         cannot add to a base image, so the image is built from deploy/container/Dockerfile instead
+         and this project only has to produce a framework-dependent publish for it to copy. Being
+         RID-agnostic is what makes one publish serve both architectures.
+
+         Program.cs is linked from the tool project rather than duplicated, so the tool and the
+         container are compiled from the same source and cannot drift. -->
+    <IsPackable>false</IsPackable>
+    <AssemblyName>ktsu.GitBranchStateCache.Service</AssemblyName>
+    <PackageProjectUrl>https://github.com/ktsu-dev/GitBranchStateCache</PackageProjectUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\GitBranchStateCache.Tool\Program.cs" Link="Program.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GitBranchStateCache\GitBranchStateCache.csproj" />
+    <PackageReference Include="Polyfill" PrivateAssets="all" />
+    <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="ktsu.Essentials" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\GitBranchStateCache.Tool\appsettings*.json" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

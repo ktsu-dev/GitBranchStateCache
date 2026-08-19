@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: gitbranchstatecache
+  labels:
+    app.kubernetes.io/name: gitbranchstatecache
+spec:
+  # A StatefulSet rather than a Deployment because the mirrors live on a read-write-once volume,
+  # which cannot be shared between pods. Each replica holds its own mirrors and its own diff cache,
+  # so replicas multiply fetch traffic and disk without improving the hit rate. Start at one and
+  # scale out only when a single pod saturates.
+  replicas: 1
+  serviceName: gitbranchstatecache
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gitbranchstatecache
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gitbranchstatecache
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gitbranchstatecache
+          image: ghcr.io/ktsu-dev/gitbranchstatecache:latest
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: gitbranchstatecache-config
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Not read-only, unlike the object cache. git writes lock files, temporary packs and
+            # config inside the repository directory it is working in, and that directory is the
+            # mounted volume rather than the image, so the root filesystem could be read-only in
+            # principle. It is left writable because git also writes to the temporary directory in
+            # places that are awkward to enumerate, and a mirror that fails to fetch for that reason
+            # presents as data quietly going stale.
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              # A diff of a very divergent branch is held in memory while it is assembled, and the
+              # diff cache holds a bounded number of them, so memory scales with MaxCachedDiffs and
+              # the size of the repository rather than with request volume.
+              memory: 512Mi
+              cpu: 250m
+            limits:
+              memory: 2Gi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 24
+          volumeMounts:
+            - name: mirrors
+              mountPath: /var/lib/gitbranchstatecache
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: mirrors
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            # Sized by the allow-list rather than by traffic, which is what makes it possible to
+            # provision in advance: only the repositories named in the configuration can ever be
+            # mirrored. The mirrors are blobless and an asset tracked by Git LFS is a pointer file of
+            # a hundred or so bytes in git, so this is far smaller than the repositories themselves.
+            storage: 50Gi

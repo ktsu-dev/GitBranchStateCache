@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Sdk Name="ktsu.Sdk" />
+  <Sdk Name="ktsu.Sdk.Tool" />
+
+  <ItemGroup>
+    <ProjectReference Include="..\GitBranchStateCache\GitBranchStateCache.csproj" />
+    <PackageReference Include="Polyfill" PrivateAssets="all" />
+    <PackageReference Include="System.CommandLine" />
+    <!-- Used directly for UserDirectories, so referenced rather than relied on transitively. -->
+    <PackageReference Include="ktsu.Essentials" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Microsoft.NET.Sdk does not glob appsettings the way Microsoft.NET.Sdk.Web does. -->
+    <Content Include="appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <!-- See the note in GitBranchStateCache.csproj: ktsu.Sdk reads PROJECT_URL.url whole. -->
+    <PackageProjectUrl>https://github.com/ktsu-dev/GitBranchStateCache</PackageProjectUrl>
+  </PropertyGroup>
+</Project>

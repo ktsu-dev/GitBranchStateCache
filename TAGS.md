@@ -1,0 +1,1 @@
+.NET;C#;dotnet;csharp;git;branch;diff;merge base;cache;caching;mirror;partial clone;blobless;unreal engine;source control;git lfs;github;azure devops;kubernetes;container;dotnet tool;aspnetcore;devops

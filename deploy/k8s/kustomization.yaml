@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# includeSelectors is off on purpose: the selectors in the manifests are written out explicitly, and
+# letting kustomize rewrite them means a label change silently orphans running pods.
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/name: gitbranchstatecache
+      app.kubernetes.io/component: cache
+
+resources:
+  - configmap.yaml
+  - service.yaml
+  - statefulset.yaml
+  - ingress.yaml
+
+# There is deliberately no secret in this base, and no place for one. This service holds no
+# credentials of its own: every upstream operation runs under a requesting client's own credential,
+# relayed from the Authorization header of the request that needed it. If a future change appears to
+# need a service credential here, that is the change to question rather than the manifest.
+#
+# Deploy this adjacent to the forge, not on-premises. Its cost is round trips, and its clients are
+# worst served on residential links, which is the opposite placement from an object cache.

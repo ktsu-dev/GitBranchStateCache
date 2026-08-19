@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gitbranchstatecache
+  labels:
+    app.kubernetes.io/name: gitbranchstatecache
+  annotations:
+    # The first request for a repository clones a mirror of it, and a request that arrives while a
+    # very divergent branch is being diffed waits for that computation. Both legitimately take
+    # minutes, and the default read timeout cuts them off part way, which presents as an editor
+    # intermittently failing to refresh rather than as an obvious misconfiguration.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    # Requests carry a path list rather than content, but a client warming its whole project state
+    # can send a large one, and the default body limit is smaller than that gets.
+    nginx.ingress.kubernetes.io/proxy-body-size: 32m
+spec:
+  # These annotations are nginx-specific. A different ingress controller needs its own equivalents.
+  ingressClassName: nginx
+  rules:
+    - host: branch-state.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gitbranchstatecache
+                port:
+                  name: http

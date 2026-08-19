@@ -1,0 +1,11 @@
+# Build output is rebuilt inside the image, and copying it in would both bloat the context and risk
+# a stale assembly shadowing a freshly compiled one.
+**/bin/
+**/obj/
+**/TestResults/
+.git/
+.github/
+.vs/
+.idea/
+docs/
+deploy/k8s/
