@@ -113,7 +113,12 @@ public class MirrorFetcherRealGitTests
 
 			// A file URL rather than a bare path, so git uses its real transport rather than the
 			// hardlink shortcut it takes for a local directory.
-			new Uri($"file:///{_source.Replace('\\', '/')}"),
+			// Uri builds the file URI for an absolute local path on either platform. Composing
+			// "file:///" with the path by hand assumes the path does not begin with a separator,
+			// which holds for a drive-letter path and not for a POSIX one: the result gains a
+			// fourth slash and the first segment is then parsed as the URI's authority, so git
+			// is handed a path with its leading directory missing.
+			new Uri(_source),
 			UpstreamBase,
 			authorization: null,
 			CancellationToken.None);
@@ -220,7 +225,7 @@ public class MirrorFetcherRealGitTests
 		MirrorFetchResult result = await fetcher.EnsureCurrentAsync(
 			new MirrorKey("github", "studio/game.git"),
 			directory,
-			new Uri($"file:///{_source.Replace('\\', '/')}-does-not-exist"),
+			new Uri(_source + "-does-not-exist"),
 			UpstreamBase,
 			authorization: null,
 			CancellationToken.None);
