@@ -1,8 +1,6 @@
-## v1.0.6 (patch)
+## v1.0.7 (patch)
 
-Changes since v1.0.5:
+Changes since v1.0.6:
 
-- test: let Uri build the file URI for the upstream path [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
-- ci: make the SonarQube quality gate opt in [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
-- ci: adopt the unified dotnet workflow [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
+- Bump the ktsu group with 2 updates ([@dependabot[bot]](https://github.com/dependabot[bot]))
 
