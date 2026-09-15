@@ -3,9 +3,11 @@
 namespace ktsu.GitBranchStateCache.Tests.Mirrors;
 
 using System.Diagnostics.Metrics;
+using ktsu.GitBranchStateCache.Coalescing;
 using ktsu.GitBranchStateCache.Configuration;
 using ktsu.GitBranchStateCache.Mirrors;
 using ktsu.GitBranchStateCache.Observability;
+using ktsu.GitBranchStateCache.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -16,6 +18,9 @@ using Testably.Abstractions.Testing;
 [TestClass]
 public class MirrorMaintenanceServiceTests
 {
+	/// <summary>Gets or sets the context MSTest supplies, used for the run's cancellation token.</summary>
+	public TestContext TestContext { get; set; } = null!;
+
 	private static readonly string Root = Path.Combine(
 		Path.GetPathRoot(Path.GetTempPath()) ?? Path.DirectorySeparatorChar.ToString(),
 		"gitbranchstatecache-sweep");
@@ -48,6 +53,35 @@ public class MirrorMaintenanceServiceTests
 			NullLogger<MirrorMaintenanceService>.Instance);
 
 		return (service, store, fileSystem, time);
+	}
+
+	/// <summary>
+	/// Builds a fetcher sharing the sweep's store, filesystem and clock, so the two race for real.
+	/// </summary>
+	private static MirrorFetcher BuildFetcher(
+		FakeGitRunner runner,
+		MirrorStore store,
+		MockFileSystem fileSystem,
+		FakeTimeProvider time)
+	{
+		IOptions<GitBranchStateCacheOptions> options = Options.Create(new GitBranchStateCacheOptions
+		{
+			MirrorRoot = Root,
+		});
+
+		ServiceCollection services = new();
+		services.AddMetrics();
+		IMeterFactory meterFactory = services.BuildServiceProvider().GetRequiredService<IMeterFactory>();
+
+		return new MirrorFetcher(
+			runner,
+			store,
+			fileSystem,
+			new SingleFlight(),
+			new BranchStateMetrics(meterFactory),
+			options,
+			time,
+			NullLogger<MirrorFetcher>.Instance);
 	}
 
 	private static string Seed(MirrorStore store, MockFileSystem fileSystem, string repositoryPath)
@@ -115,6 +149,78 @@ public class MirrorMaintenanceServiceTests
 			Build(TimeSpan.FromDays(30));
 
 		string directory = Seed(store, fileSystem, "studio/game.git");
+
+		service.Sweep();
+
+		Assert.IsTrue(store.Exists(directory));
+	}
+
+	[TestMethod]
+	public async Task Sweep_WhileAFetchIsRunningAgainstAnIdleMirror_KeepsTheMirrorAndLetsTheFetchFinishAsync()
+	{
+		// A fetch of a large repository can run for the whole of FetchTimeout, and the sweep ticks on its
+		// own schedule. If the mirror only records the fetch once it succeeds, a sweep landing in that
+		// window reads the pre-fetch markers, judges the mirror idle, and recursively deletes the very
+		// directory git has open as its working directory.
+		(MirrorMaintenanceService service, MirrorStore store, MockFileSystem fileSystem, FakeTimeProvider time) =
+			Build(TimeSpan.FromDays(30));
+
+		string directory = Seed(store, fileSystem, "studio/game.git");
+		store.MarkUsed(directory);
+		store.MarkFetched(directory);
+		time.Advance(TimeSpan.FromDays(31));
+
+		TaskCompletionSource fetchStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		TaskCompletionSource fetchMayFinish = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		FakeGitRunner runner = new()
+		{
+			Before = async _ =>
+			{
+				fetchStarted.TrySetResult();
+				await fetchMayFinish.Task.ConfigureAwait(false);
+			},
+		};
+
+		MirrorFetcher fetcher = BuildFetcher(runner, store, fileSystem, time);
+
+		Task<MirrorFetchResult> fetch = fetcher.EnsureCurrentAsync(
+			new MirrorKey("github", "studio/game.git"),
+			directory,
+			new Uri("https://forge.example/studio/game.git"),
+			new Uri("https://forge.example"),
+			authorization: null,
+			TestContext.CancellationTokenSource.Token);
+
+		await fetchStarted.Task.ConfigureAwait(false);
+
+		service.Sweep();
+
+		// Checked while the fetch is still blocked. A later check would not see the reap: writing the
+		// fetch marker recreates the directory, so the mirror comes back empty rather than missing.
+		bool survived = fileSystem.File.Exists(fileSystem.Path.Combine(directory, "objects", "pack"));
+
+		fetchMayFinish.TrySetResult();
+		MirrorFetchResult result = await fetch.ConfigureAwait(false);
+
+		Assert.IsTrue(survived, "The sweep reaped a mirror that a fetch had open as its working directory.");
+		Assert.AreEqual(MirrorFetchStatus.Current, result.Status);
+		Assert.AreEqual(1, runner.CountOf("fetch"));
+	}
+
+	[TestMethod]
+	public void Sweep_AMirrorFetchedRecentlyButNotYetRecordedAsUsed_IsKept()
+	{
+		// A request whose refs are already current returns without fetching and records its own use only
+		// once it has been answered. In that window the fetch marker is fresh and the use marker is not,
+		// so a sweep reading only the use marker reaps a mirror that is being read from right now.
+		(MirrorMaintenanceService service, MirrorStore store, MockFileSystem fileSystem, FakeTimeProvider time) =
+			Build(TimeSpan.FromDays(30));
+
+		string directory = Seed(store, fileSystem, "studio/game.git");
+		store.MarkUsed(directory);
+		time.Advance(TimeSpan.FromDays(31));
+		store.MarkFetched(directory);
 
 		service.Sweep();
 
