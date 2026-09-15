@@ -72,6 +72,8 @@ gitbranchstatecache --upstream github=https://github.com --allow github=studio/g
 
 `--allow` is required at least once per upstream and is also repeatable. Unlike `ktsu.GitLfsCache`, there is no pattern meaning every repository: every pattern must name at least one literal path segment. One request for a repository not on the list would clone a permanent mirror of it onto a shared volume, sized by the repository rather than by the request, that nothing ever evicts.
 
+Patterns match case insensitively, because forge repository names are, and a pattern that fails only because someone typed `Studio` is a support ticket rather than a control. An allowed repository path is then reduced to lower case before anything is derived from it, so clients that disagree about casing still share one mirror, one fetch and one cached diff, and the volume holds one directory per repository whatever casing was used to ask for it. What is sent to the forge keeps the caller's spelling.
+
 ### Asking for branch state
 
 ```http
