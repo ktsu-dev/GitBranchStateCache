@@ -90,20 +90,29 @@ public sealed class MirrorMaintenanceService(
 	/// Reports when a mirror was last useful to anyone.
 	/// </summary>
 	/// <remarks>
-	/// The last time it answered a request, falling back to the last fetch and then to when the
-	/// directory was created. The fallbacks matter for a mirror created by a deployment that predates
-	/// the markers, which would otherwise look infinitely old and be deleted on the first sweep.
+	/// The later of the last time it answered a request and the last time it was fetched, falling back
+	/// to when the directory was created. The fallback matters for a mirror created by a deployment that
+	/// predates the markers, which would otherwise look infinitely old and be deleted on the first sweep.
+	/// <para>
+	/// Both markers are considered rather than the first one present. A request whose refs were already
+	/// current returns without fetching and records its own use only once it has been answered, so in
+	/// that window the mirror carries a fresh fetch marker alongside a stale use marker. Reading only
+	/// the use marker would reap a mirror that is being read from right now.
+	/// </para>
 	/// </remarks>
 	private DateTimeOffset? LastTouched(string directory)
 	{
-		if (mirrors.LastUsedAt(directory) is DateTimeOffset used)
+		DateTimeOffset? used = mirrors.LastUsedAt(directory);
+		DateTimeOffset? fetched = mirrors.RefsFetchedAt(directory);
+
+		if (used is DateTimeOffset lastUsed && fetched is DateTimeOffset lastFetched)
 		{
-			return used;
+			return lastUsed > lastFetched ? lastUsed : lastFetched;
 		}
 
-		if (mirrors.RefsFetchedAt(directory) is DateTimeOffset fetched)
+		if ((used ?? fetched) is DateTimeOffset recorded)
 		{
-			return fetched;
+			return recorded;
 		}
 
 		try

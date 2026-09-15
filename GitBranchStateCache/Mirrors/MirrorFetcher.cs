@@ -197,6 +197,12 @@ public sealed class MirrorFetcher(
 	{
 		metrics.RecordFetch(key.Upstream);
 
+		// Recorded before the fetch rather than after it. A fetch of a large repository can run for the
+		// whole of FetchTimeout, and a maintenance sweep that ticks during it would otherwise still read
+		// the pre-fetch markers, judge the mirror idle, and recursively delete the directory this fetch
+		// has open as its working directory.
+		mirrors.MarkUsed(directory);
+
 		GitResult fetch = await runner.RunAsync(
 			new GitInvocation
 			{

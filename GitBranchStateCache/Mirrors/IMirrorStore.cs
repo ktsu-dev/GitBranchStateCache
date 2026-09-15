@@ -40,11 +40,15 @@ public interface IMirrorStore
 	/// <param name="directory">The mirror directory.</param>
 	public void MarkFetched(string directory);
 
-	/// <summary>Records that a request has just been answered from this mirror.</summary>
+	/// <summary>Records that a request is using this mirror.</summary>
+	/// <remarks>
+	/// Recorded when a request starts working against the mirror as well as when one has been answered
+	/// from it, so that a long fetch does not look idle to anything reading this marker while it runs.
+	/// </remarks>
 	/// <param name="directory">The mirror directory.</param>
 	public void MarkUsed(string directory);
 
-	/// <summary>Reports when this mirror last answered a request.</summary>
+	/// <summary>Reports when a request last used this mirror.</summary>
 	/// <param name="directory">The mirror directory.</param>
 	/// <returns>The instant, or null when it has never been recorded.</returns>
 	public DateTimeOffset? LastUsedAt(string directory);
