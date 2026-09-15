@@ -1,6 +1,4 @@
-## v1.0.21 (patch)
+## v1.0.21
 
-Changes since v1.0.20:
-
-- fix: keep the sweep from reaping a mirror that is in use [patch] ([@Claude](https://github.com/Claude))
+No significant changes detected since v1.0.21.
 
