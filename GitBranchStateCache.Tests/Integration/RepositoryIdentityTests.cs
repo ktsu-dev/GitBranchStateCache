@@ -40,7 +40,7 @@ public class RepositoryIdentityTests
 		git.Commits.Add(ClientBase);
 		git.MergeBases[$"{ClientBase} {MainTip}"] = ForkPoint;
 		git.Diffs[$"{ForkPoint} {MainTip}"] =
-			$":100644 100644 2222222222222222222222222222222222222222 1111111111111111111111111111111111111111 M\0Content/Chars/Bar.uasset\0";
+			":100644 100644 2222222222222222222222222222222222222222 1111111111111111111111111111111111111111 M\0Content/Chars/Bar.uasset\0";
 	}
 
 	private static HttpRequestMessage Request(string url)
