@@ -4,10 +4,10 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="Polyfill" Version="11.3.0" />
-    <PackageVersion Include="ktsu.Essentials" Version="2.5.2" />
-    <PackageVersion Include="ktsu.Essentials.FileSystemProviders.Native" Version="2.5.2" />
-    <PackageVersion Include="ktsu.Semantics.Paths" Version="5.3.1" />
-    <PackageVersion Include="ktsu.Semantics.Strings" Version="5.3.1" />
+    <PackageVersion Include="ktsu.Essentials" Version="2.6.2" />
+    <PackageVersion Include="ktsu.Essentials.FileSystemProviders.Native" Version="2.6.2" />
+    <PackageVersion Include="ktsu.Semantics.Paths" Version="5.3.4" />
+    <PackageVersion Include="ktsu.Semantics.Strings" Version="5.3.4" />
     <PackageVersion Include="Testably.Abstractions.FileSystem.Interface" Version="10.3.0" />
     <PackageVersion Include="System.CommandLine" Version="2.0.12" />
   </ItemGroup>
