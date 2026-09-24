@@ -12,11 +12,12 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 /// What counts as "the same repository" once a request has been accepted.
 /// </summary>
 /// <remarks>
-/// The allow-list matches case insensitively on purpose, so two callers can address one repository by
-/// two spellings and both be served. Everything derived afterwards — the mirror directory, the
-/// coalescing key, the diff cache key, the admission key — compares ordinally, so unless the path is
-/// canonicalised once at the point it is accepted, one repository quietly becomes two of everything.
-/// That is the whole of this service's purpose inverted: it would do the work twice rather than once.
+/// The upstream registry and the allow-list both match case insensitively on purpose, so two callers
+/// can address one repository by two spellings — of the repository path, of the upstream key, or of
+/// both — and both be served. Everything derived afterwards — the mirror directory, the coalescing
+/// key, the diff cache key, the admission key — compares ordinally, so unless the key is canonicalised
+/// once at the point it is accepted, one repository quietly becomes two of everything. That is the
+/// whole of this service's purpose inverted: it would do the work twice rather than once.
 /// </remarks>
 [TestClass]
 public class RepositoryIdentityTests
@@ -31,6 +32,12 @@ public class RepositoryIdentityTests
 
 	/// <summary>The same repository as a client that cloned it with different casing spells it.</summary>
 	private const string CallerSpelling = "/v1/github/Studio/Game.git/state";
+
+	/// <summary>
+	/// The same repository again, reached through the upstream key spelled the way a forge brands
+	/// itself rather than the way the configuration keys it.
+	/// </summary>
+	private const string UpstreamCallerSpelling = "/v1/GitHub/studio/game.git/state";
 
 	private const string Body = $$"""{"base":"{{ClientBase}}","branchPatterns":["origin/main"]}""";
 
@@ -116,6 +123,79 @@ public class RepositoryIdentityTests
 		Seed(fixture.Git);
 
 		using HttpResponseMessage response = await fixture.Client.SendAsync(Request(CallerSpelling));
+
+		Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+
+		Assert.IsTrue(fixture.FileSystem.Directory.Exists(fixture.FileSystem.Path.Combine(
+			ServiceFixture.MirrorRoot,
+			"github",
+			"studio",
+			"game.git",
+			"mirror.git")));
+	}
+
+	[TestMethod]
+	public async Task TwoSpellingsOfOneUpstream_AreBothServed()
+	{
+		// The premise for the upstream key, matching the one above for the repository path: the registry
+		// and the allow-list both resolve it case insensitively, so a caller that writes the forge's own
+		// branding rather than the configuration key is still addressing the configured upstream.
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync();
+		Seed(fixture.Git);
+
+		using HttpResponseMessage configured = await fixture.Client.SendAsync(Request(ConfiguredSpelling));
+		using HttpResponseMessage caller = await fixture.Client.SendAsync(Request(UpstreamCallerSpelling));
+
+		Assert.AreEqual(HttpStatusCode.OK, configured.StatusCode);
+		Assert.AreEqual(HttpStatusCode.OK, caller.StatusCode);
+	}
+
+	[TestMethod]
+	public async Task TwoSpellingsOfOneUpstream_ShareOneMirrorFetchDiffAndAdmission()
+	{
+		// The same duplication the repository-path case guards against, reached through the sibling half
+		// of the key instead. One repository, so one clone, one credential probe, and one diff.
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync();
+		Seed(fixture.Git);
+
+		using HttpResponseMessage configured = await fixture.Client.SendAsync(Request(ConfiguredSpelling));
+		using HttpResponseMessage caller = await fixture.Client.SendAsync(Request(UpstreamCallerSpelling));
+
+		Assert.AreEqual(HttpStatusCode.OK, configured.StatusCode);
+		Assert.AreEqual(HttpStatusCode.OK, caller.StatusCode);
+
+		Assert.AreEqual(1, fixture.Git.CountOf("clone"));
+		Assert.AreEqual(1, fixture.Git.CountOf("ls-remote"));
+		Assert.AreEqual(1, fixture.Git.CountOf("diff-tree"));
+	}
+
+	[TestMethod]
+	public async Task TwoSpellingsOfOneUpstream_ProduceOneMirrorDirectory()
+	{
+		// Asserted against the volume, because an upstream key that is not canonicalised becomes a
+		// second top-level directory holding a complete duplicate of every repository under it.
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync();
+		Seed(fixture.Git);
+
+		using HttpResponseMessage configured = await fixture.Client.SendAsync(Request(ConfiguredSpelling));
+		using HttpResponseMessage caller = await fixture.Client.SendAsync(Request(UpstreamCallerSpelling));
+
+		IDirectory directory = fixture.FileSystem.Directory;
+
+		Assert.HasCount(
+			1,
+			directory.GetDirectories(ServiceFixture.MirrorRoot, "mirror.git", SearchOption.AllDirectories));
+	}
+
+	[TestMethod]
+	public async Task ARequestWithTheUpstreamSpelledDifferently_MirrorsUnderTheCanonicalUpstream()
+	{
+		// The canonical form is lower case for the upstream key as much as for the path, so the volume
+		// carries one directory per configured upstream whatever casing reached the service.
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync();
+		Seed(fixture.Git);
+
+		using HttpResponseMessage response = await fixture.Client.SendAsync(Request(UpstreamCallerSpelling));
 
 		Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
 

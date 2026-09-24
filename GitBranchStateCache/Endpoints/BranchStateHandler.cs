@@ -407,7 +407,7 @@ internal sealed class BranchStateHandler(
 			return null;
 		}
 
-		MirrorKey key = new(route.Upstream, Canonicalize(route.RepositoryPath));
+		MirrorKey key = new(Canonicalize(route.Upstream), Canonicalize(route.RepositoryPath));
 
 		if (!mirrors.TryResolve(key, out string? directory)
 			|| !UpstreamUrl.TryCombine(upstreamBase!, route.RepositoryPath, out Uri? repositoryUrl))
@@ -419,26 +419,37 @@ internal sealed class BranchStateHandler(
 	}
 
 	/// <summary>
-	/// Reduces a repository path to the one spelling this service knows it by.
+	/// Reduces one half of a <see cref="MirrorKey"/> — the upstream key or the repository path — to the
+	/// one spelling this service knows it by.
 	/// </summary>
 	/// <remarks>
-	/// This exists because the allow-list immediately above it matches case insensitively, deliberately
-	/// and for good reasons of its own, while every identity derived from the path afterwards compares
-	/// ordinally: the mirror directory on a case-sensitive volume, the coalescing key that keeps
-	/// concurrent work on one repository to a single fetch, the diff cache key built from it, and the
-	/// admission key. Pass the caller's literal spelling on and one repository addressed two ways is
-	/// two mirrors on disk, fetched twice per heartbeat, diffed twice, and probed twice — which is the
-	/// duplication this service exists to remove, reintroduced by a difference the allow-list has
-	/// already ruled irrelevant. So it is canonicalised once, here, at the only point that decides what
-	/// a request is about. Removing this does not simplify anything; it silently doubles the cost of
-	/// every repository whose callers do not agree on casing.
+	/// This exists because the upstream resolution and the allow-list immediately above it both match
+	/// case insensitively, deliberately and for good reasons of their own, while every identity derived
+	/// from the key afterwards compares ordinally: the mirror directory on a case-sensitive volume, the
+	/// coalescing key that keeps concurrent work on one repository to a single fetch, the diff cache key
+	/// built from it, and the admission key. Pass the caller's literal spelling on and one repository
+	/// addressed two ways is two mirrors on disk, fetched twice per heartbeat, diffed twice, and probed
+	/// twice — which is the duplication this service exists to remove, reintroduced by a difference the
+	/// checks above have already ruled irrelevant. So it is canonicalised once, here, at the only point
+	/// that decides what a request is about. Removing this does not simplify anything; it silently
+	/// doubles the cost of every repository whose callers do not agree on casing.
+	/// <para>
+	/// Both halves of the key go through this, and for the same reason. Canonicalising only the
+	/// repository path leaves the identical duplication reachable through the upstream key instead,
+	/// because <see cref="IUpstreamRegistry.TryResolve"/> and <see cref="IRepositoryAllowList.IsAllowed"/>
+	/// accept <c>GitHub</c> and <c>github</c> as one configured upstream while everything downstream of
+	/// them tells the two apart.
+	/// </para>
 	/// <para>
 	/// Only this service's own bookkeeping is canonicalised. What is sent to the forge keeps the
 	/// caller's spelling, because the forge is the authority on how it spells its own repository names
-	/// and this service should not be rewriting a URL on its behalf.
+	/// and this service should not be rewriting a URL on its behalf. The upstream key never reaches the
+	/// forge at all: the base URL comes from configuration, not from the caller's segment.
 	/// </para>
 	/// </remarks>
-	private static string Canonicalize(string repositoryPath) => repositoryPath.ToLowerInvariant();
+	/// <param name="segment">The upstream key or repository path as the caller spelled it.</param>
+	/// <returns>The spelling this service records the request under.</returns>
+	private static string Canonicalize(string segment) => segment.ToLowerInvariant();
 
 	private static bool TryParsePatterns(
 		IReadOnlyList<string>? requested,
