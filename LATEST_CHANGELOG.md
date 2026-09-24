@@ -1,6 +1,6 @@
-## v1.0.29 (patch)
+## v1.0.30 (patch)
 
-Changes since v1.0.28:
+Changes since v1.0.29:
 
-- fix: canonicalize the upstream key, not just the repository path [patch] ([@Claude](https://github.com/Claude))
+- Bump the ktsu group with 4 updates ([@dependabot[bot]](https://github.com/dependabot[bot]))
 
