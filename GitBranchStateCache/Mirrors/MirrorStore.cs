@@ -88,14 +88,39 @@ public sealed class MirrorStore(
 	public DateTimeOffset? LastUsedAt(string directory) => ReadMarker(directory, UsedMarker);
 
 	/// <inheritdoc />
+	/// <remarks>
+	/// A directory named <c>mirror.git</c> is not necessarily a mirror. Clients send repository paths
+	/// with a <c>.git</c> suffix, so the repository <c>studio/mirror</c> lives at
+	/// <c>studio/mirror.git/mirror.git</c>, and its parent is only a path segment. Such a directory is
+	/// recognised by holding another candidate while having no files of its own: a real mirror is a
+	/// bare repository and always has at least <c>HEAD</c>. Left in, the parent would never carry a
+	/// marker, would look idle from the day it was created, and would be reaped along with the live
+	/// mirror inside it.
+	/// </remarks>
 	public IReadOnlyList<string> Enumerate()
 	{
 		string root = options.Value.MirrorRoot;
 
-		return fileSystem.Directory.Exists(root)
-			? fileSystem.Directory.GetDirectories(root, MirrorDirectoryName, SearchOption.AllDirectories)
-			: [];
+		if (!fileSystem.Directory.Exists(root))
+		{
+			return [];
+		}
+
+		string[] candidates = fileSystem.Directory.GetDirectories(root, MirrorDirectoryName, SearchOption.AllDirectories);
+
+		return [.. candidates.Where(candidate => !IsRepositoryPathSegment(candidate, candidates))];
 	}
+
+	/// <summary>
+	/// Reports whether a path lies strictly inside a directory.
+	/// </summary>
+	/// <param name="path">The path that may be inside.</param>
+	/// <param name="directory">The directory that may contain it.</param>
+	/// <returns><see langword="true"/> when <paramref name="path"/> is below <paramref name="directory"/>.</returns>
+	internal static bool IsInside(string path, string directory) =>
+		path.Length > directory.Length + 1
+		&& path.StartsWith(directory, StringComparison.Ordinal)
+		&& path[directory.Length] is '/' or '\\';
 
 	/// <inheritdoc />
 	public void Delete(string directory)
@@ -137,6 +162,10 @@ public sealed class MirrorStore(
 		return segment.All(character =>
 			char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '-');
 	}
+
+	private bool IsRepositoryPathSegment(string candidate, string[] candidates) =>
+		candidates.Any(other => IsInside(other, candidate))
+		&& fileSystem.Directory.GetFiles(candidate).Length == 0;
 
 	private DateTimeOffset? ReadMarker(string directory, string marker)
 	{

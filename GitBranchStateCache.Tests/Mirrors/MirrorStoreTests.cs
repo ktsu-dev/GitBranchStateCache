@@ -112,6 +112,39 @@ public class MirrorStoreTests
 	}
 
 	[TestMethod]
+	public void Enumerate_ARepositoryNamedMirror_ListsOnlyTheMirrorAndNotItsPathSegment()
+	{
+		// Clients send repository paths with a .git suffix, so studio/mirror lives at
+		// studio/mirror.git/mirror.git. The outer directory is a path segment, not a mirror.
+		(MirrorStore store, MockFileSystem fileSystem, _) = Build();
+
+		Assert.IsTrue(store.TryResolve(new MirrorKey("github", "studio/mirror.git"), out string? directory));
+		fileSystem.Directory.CreateDirectory(directory!);
+		fileSystem.File.WriteAllText(fileSystem.Path.Combine(directory!, "HEAD"), "ref: refs/heads/main");
+
+		IReadOnlyList<string> mirrors = store.Enumerate();
+
+		Assert.HasCount(1, mirrors);
+		Assert.AreEqual(directory, mirrors[0]);
+	}
+
+	[TestMethod]
+	public void Enumerate_AMirrorHoldingAnotherMirror_ListsBoth()
+	{
+		// studio is mirrored at studio/mirror.git, and studio/mirror at studio/mirror.git/mirror.git.
+		// The outer one is a real bare repository, so it has files of its own and is still a mirror.
+		(MirrorStore store, MockFileSystem fileSystem, _) = Build();
+
+		Assert.IsTrue(store.TryResolve(new MirrorKey("github", "studio"), out string? outer));
+		Assert.IsTrue(store.TryResolve(new MirrorKey("github", "studio/mirror.git"), out string? inner));
+		fileSystem.Directory.CreateDirectory(inner!);
+		fileSystem.File.WriteAllText(fileSystem.Path.Combine(outer!, "HEAD"), "ref: refs/heads/main");
+		fileSystem.File.WriteAllText(fileSystem.Path.Combine(inner!, "HEAD"), "ref: refs/heads/main");
+
+		Assert.HasCount(2, store.Enumerate());
+	}
+
+	[TestMethod]
 	public void Enumerate_WhenTheRootIsMissing_IsEmpty()
 	{
 		MockFileSystem fileSystem = new();
