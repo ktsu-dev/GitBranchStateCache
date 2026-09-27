@@ -193,25 +193,12 @@ public sealed class BranchPattern
 		{
 			first = false;
 
-			if (!TryReadMember(pattern, ref index, out char low))
+			if (!TryReadRange(pattern, ref index, out char low, out char high))
 			{
 				break;
 			}
 
-			char high = low;
-			if (index + 1 < pattern.Length && pattern[index] == '-' && pattern[index + 1] != ']')
-			{
-				index++;
-				if (!TryReadMember(pattern, ref index, out high))
-				{
-					break;
-				}
-			}
-
-			if (low <= character && character <= high)
-			{
-				found = true;
-			}
+			found |= low <= character && character <= high;
 		}
 
 		if (index >= pattern.Length)
@@ -223,6 +210,38 @@ public sealed class BranchPattern
 
 		length = index + 1 - start;
 		matched = found != negated;
+		return true;
+	}
+
+	/// <summary>
+	/// Reads one member of a bracket expression: a single character, or a range such as <c>a-z</c>.
+	/// </summary>
+	/// <param name="pattern">The whole pattern.</param>
+	/// <param name="index">Where the member starts; moved past it.</param>
+	/// <param name="low">The first character the member covers.</param>
+	/// <param name="high">The last character the member covers; equal to <paramref name="low"/> for a single character.</param>
+	/// <returns>
+	/// <see langword="false"/> when the pattern ends in a lone backslash, which leaves the bracket
+	/// unclosed.
+	/// </returns>
+	/// <remarks>
+	/// A <c>-</c> directly before the closing <c>]</c> is an ordinary member, not the start of a range.
+	/// </remarks>
+	private static bool TryReadRange(ReadOnlySpan<char> pattern, ref int index, out char low, out char high)
+	{
+		if (!TryReadMember(pattern, ref index, out low))
+		{
+			high = default;
+			return false;
+		}
+
+		high = low;
+		if (index + 1 < pattern.Length && pattern[index] == '-' && pattern[index + 1] != ']')
+		{
+			index++;
+			return TryReadMember(pattern, ref index, out high);
+		}
+
 		return true;
 	}
 
