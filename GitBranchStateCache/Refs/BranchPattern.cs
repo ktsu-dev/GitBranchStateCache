@@ -19,6 +19,12 @@ namespace ktsu.GitBranchStateCache.Refs;
 /// matcher backtracks at most once per wildcard and cannot be made to run long.
 /// </para>
 /// <para>
+/// The same constructs git's wildmatch honours for <c>git branch --list</c> are honoured here:
+/// <c>*</c>, <c>?</c>, bracket expressions such as <c>[0-9]</c>, <c>[abc]</c>, <c>[!x]</c> and
+/// <c>[^x]</c> (a <c>]</c> placed first is literal), and <c>\</c> to escape the next character. A
+/// <c>[</c> with no closing <c>]</c> is an ordinary character.
+/// </para>
+/// <para>
 /// Matching is case sensitive, because git ref names are.
 /// </para>
 /// </remarks>
@@ -81,8 +87,9 @@ public sealed class BranchPattern
 	/// <remarks>
 	/// The classic linear wildcard match: walk both sides together, and on a mismatch fall back to the
 	/// most recent star and let it consume one more character. Because only the most recent star is
-	/// ever revisited, the work is bounded by the product of the two lengths in the worst case and is
-	/// linear in practice, with no recursion and nothing to backtrack exponentially.
+	/// ever revisited, the work is bounded by the product of the two lengths (times the length of a
+	/// bracket expression, which is itself bounded by the pattern) and is linear in practice, with no
+	/// recursion and nothing to backtrack exponentially.
 	/// </remarks>
 	private static bool Matches(ReadOnlySpan<char> pattern, ReadOnlySpan<char> name)
 	{
@@ -93,16 +100,16 @@ public sealed class BranchPattern
 
 		while (nameIndex < name.Length)
 		{
-			if (patternIndex < pattern.Length && (pattern[patternIndex] == '?' || pattern[patternIndex] == name[nameIndex]))
-			{
-				patternIndex++;
-				nameIndex++;
-			}
-			else if (patternIndex < pattern.Length && pattern[patternIndex] == '*')
+			if (patternIndex < pattern.Length && pattern[patternIndex] == '*')
 			{
 				starIndex = patternIndex;
 				resumeIndex = nameIndex;
 				patternIndex++;
+			}
+			else if (patternIndex < pattern.Length && MatchesOne(pattern, patternIndex, name[nameIndex], out int length))
+			{
+				patternIndex += length;
+				nameIndex++;
 			}
 			else if (starIndex >= 0)
 			{
@@ -122,5 +129,131 @@ public sealed class BranchPattern
 		}
 
 		return patternIndex == pattern.Length;
+	}
+
+	/// <summary>
+	/// Matches the one pattern element starting at <paramref name="index"/> against one character.
+	/// </summary>
+	/// <param name="pattern">The whole pattern.</param>
+	/// <param name="index">Where the element starts. It is not a star.</param>
+	/// <param name="character">The character from the name.</param>
+	/// <param name="length">How many pattern characters the element spans.</param>
+	/// <returns><see langword="true"/> when the element matches the character.</returns>
+	private static bool MatchesOne(ReadOnlySpan<char> pattern, int index, char character, out int length)
+	{
+		char element = pattern[index];
+
+		if (element == '?')
+		{
+			length = 1;
+			return true;
+		}
+
+		if (element == '\\' && index + 1 < pattern.Length)
+		{
+			length = 2;
+			return pattern[index + 1] == character;
+		}
+
+		if (element == '[' && TryMatchBracket(pattern, index, character, out length, out bool matched))
+		{
+			return matched;
+		}
+
+		length = 1;
+		return element == character;
+	}
+
+	/// <summary>
+	/// Matches a bracket expression such as <c>[0-9]</c> or <c>[!abc]</c> against one character.
+	/// </summary>
+	/// <param name="pattern">The whole pattern.</param>
+	/// <param name="start">Where the opening <c>[</c> is.</param>
+	/// <param name="character">The character from the name.</param>
+	/// <param name="length">How many pattern characters the expression spans, including both brackets.</param>
+	/// <param name="matched">Whether the expression matches the character.</param>
+	/// <returns>
+	/// <see langword="false"/> when the bracket is never closed, in which case the <c>[</c> is an
+	/// ordinary character.
+	/// </returns>
+	private static bool TryMatchBracket(ReadOnlySpan<char> pattern, int start, char character, out int length, out bool matched)
+	{
+		int index = start + 1;
+		bool negated = index < pattern.Length && (pattern[index] == '!' || pattern[index] == '^');
+		if (negated)
+		{
+			index++;
+		}
+
+		bool found = false;
+		bool first = true;
+
+		// A ] straight after the opening bracket (or its negation) is a member, not the end.
+		while (index < pattern.Length && (first || pattern[index] != ']'))
+		{
+			first = false;
+
+			if (!TryReadMember(pattern, ref index, out char low))
+			{
+				break;
+			}
+
+			char high = low;
+			if (index + 1 < pattern.Length && pattern[index] == '-' && pattern[index + 1] != ']')
+			{
+				index++;
+				if (!TryReadMember(pattern, ref index, out high))
+				{
+					break;
+				}
+			}
+
+			if (low <= character && character <= high)
+			{
+				found = true;
+			}
+		}
+
+		if (index >= pattern.Length)
+		{
+			length = 1;
+			matched = false;
+			return false;
+		}
+
+		length = index + 1 - start;
+		matched = found != negated;
+		return true;
+	}
+
+	/// <summary>
+	/// Reads one member character of a bracket expression, honouring a backslash escape.
+	/// </summary>
+	/// <param name="pattern">The whole pattern.</param>
+	/// <param name="index">Where the member starts; moved past it.</param>
+	/// <param name="value">The member character.</param>
+	/// <returns>
+	/// <see langword="false"/> when the pattern ends in a lone backslash, which leaves the bracket
+	/// unclosed.
+	/// </returns>
+	private static bool TryReadMember(ReadOnlySpan<char> pattern, ref int index, out char value)
+	{
+		if (pattern[index] == '\\')
+		{
+			if (index + 1 >= pattern.Length)
+			{
+				index = pattern.Length;
+				value = default;
+				return false;
+			}
+
+			value = pattern[index + 1];
+			index += 2;
+			return true;
+		}
+
+		value = pattern[index];
+		index++;
+		return true;
 	}
 }
