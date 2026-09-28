@@ -2,6 +2,7 @@
 
 namespace ktsu.GitBranchStateCache.Tests.Git;
 
+using System.Collections;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using ktsu.GitBranchStateCache.Configuration;
@@ -144,35 +145,35 @@ public class GitRunnerTests
 	}
 
 	[TestMethod]
-	public void ApplyEnvironment_SetsTheFlagsThatKeepARunPredictable()
+	public void BuildEnvironment_SetsTheFlagsThatKeepARunPredictable()
 	{
-		ProcessStartInfo startInfo = new();
-		startInfo.Environment["GIT_DIR"] = "/somewhere/inherited";
-
-		GitRunner.ApplyEnvironment(
-			startInfo,
+		Dictionary<string, string?> environment = GitRunner.BuildEnvironment(
 			new GitInvocation { Arguments = ["--version"], Timeout = TimeSpan.FromSeconds(1) },
-			new GitBranchStateCacheOptions { MirrorRoot = TempRoot });
+			new GitBranchStateCacheOptions { MirrorRoot = TempRoot },
+			new Hashtable { ["GIT_DIR"] = "/somewhere/inherited", ["PATH"] = "/usr/bin" });
 
 		// GIT_NO_LAZY_FETCH turns a demand for filtered content into a visible error rather than an
 		// enormous unplanned fetch, and no terminal prompt turns a missing credential into a refusal
 		// rather than a process waiting on a terminal that is not there.
-		Assert.AreEqual("1", startInfo.Environment["GIT_NO_LAZY_FETCH"]);
-		Assert.AreEqual("0", startInfo.Environment["GIT_TERMINAL_PROMPT"]);
-		Assert.AreEqual("1", startInfo.Environment["GIT_CONFIG_NOSYSTEM"]);
+		Assert.AreEqual("1", environment["GIT_NO_LAZY_FETCH"]);
+		Assert.AreEqual("0", environment["GIT_TERMINAL_PROMPT"]);
+		Assert.AreEqual("1", environment["GIT_CONFIG_NOSYSTEM"]);
 
-		// An inherited GIT_DIR would point every run at a repository nobody asked for.
-		Assert.IsFalse(startInfo.Environment.ContainsKey("GIT_DIR"));
+		// An inherited GIT_DIR would point every run at a repository nobody asked for. A null value in
+		// the overlay is what removes it from the child's environment.
+		Assert.IsTrue(environment.TryGetValue("GIT_DIR", out string? gitDir));
+		Assert.IsNull(gitDir);
+
+		// Everything else is inherited untouched, so it is left out of the overlay.
+		Assert.IsFalse(environment.ContainsKey("PATH"));
 	}
 
 	[TestMethod]
-	public void ApplyEnvironment_WithACredential_ScopesItToTheUpstream()
+	public void BuildEnvironment_WithACredential_ScopesItToTheUpstream()
 	{
 		const string credential = "Basic dXNlcjp0b2tlbg==";
-		ProcessStartInfo startInfo = new();
 
-		GitRunner.ApplyEnvironment(
-			startInfo,
+		Dictionary<string, string?> environment = GitRunner.BuildEnvironment(
 			new GitInvocation
 			{
 				Arguments = ["ls-remote", "https://github.com/studio/game.git"],
@@ -180,29 +181,67 @@ public class GitRunnerTests
 				Authorization = credential,
 				Timeout = TimeSpan.FromSeconds(1),
 			},
-			new GitBranchStateCacheOptions { MirrorRoot = TempRoot });
+			new GitBranchStateCacheOptions { MirrorRoot = TempRoot },
+			new Hashtable());
 
 		// Scoped to the upstream rather than set for all of http, because git matches this
 		// configuration by URL prefix and a redirect leading off the forge would otherwise carry the
 		// caller's credential with it.
-		Assert.AreEqual("2", startInfo.Environment["GIT_CONFIG_COUNT"]);
-		Assert.AreEqual("http.https://github.com/.extraHeader", startInfo.Environment["GIT_CONFIG_KEY_1"]);
-		Assert.AreEqual($"Authorization: {credential}", startInfo.Environment["GIT_CONFIG_VALUE_1"]);
+		Assert.AreEqual("2", environment["GIT_CONFIG_COUNT"]);
+		Assert.AreEqual("http.https://github.com/.extraHeader", environment["GIT_CONFIG_KEY_1"]);
+		Assert.AreEqual($"Authorization: {credential}", environment["GIT_CONFIG_VALUE_1"]);
 	}
 
 	[TestMethod]
-	public void ApplyEnvironment_WithoutACredential_SetsNoHeader()
+	public void BuildEnvironment_WithoutACredential_SetsNoHeader()
 	{
-		ProcessStartInfo startInfo = new();
-
-		GitRunner.ApplyEnvironment(
-			startInfo,
+		Dictionary<string, string?> environment = GitRunner.BuildEnvironment(
 			new GitInvocation { Arguments = ["--version"], Timeout = TimeSpan.FromSeconds(1) },
-			new GitBranchStateCacheOptions { MirrorRoot = TempRoot });
+			new GitBranchStateCacheOptions { MirrorRoot = TempRoot },
+			new Hashtable());
 
-		Assert.AreEqual("1", startInfo.Environment["GIT_CONFIG_COUNT"]);
-		Assert.AreEqual("credential.helper", startInfo.Environment["GIT_CONFIG_KEY_0"]);
+		Assert.AreEqual("1", environment["GIT_CONFIG_COUNT"]);
+		Assert.AreEqual("credential.helper", environment["GIT_CONFIG_KEY_0"]);
 	}
+
+	[TestMethod]
+	public async Task RunAsync_ACommandThatReadsStandardInput_SeesEndOfStreamRatherThanWaiting()
+	{
+		// git is never fed anything, so a child that reads standard input has to find it closed. Left
+		// inherited, it would wait on whatever this service's own standard input is, which under a
+		// service manager can be a pipe nobody writes to, and the run would end only at its timeout.
+		GitResult result = await Build(ReaderExecutable()).RunAsync(
+			new GitInvocation { Arguments = ReaderArguments(), Timeout = TimeSpan.FromSeconds(20) },
+			CancellationToken.None);
+
+		Assert.IsFalse(result.TimedOut, "The command waited on standard input until it was killed.");
+		Assert.IsTrue(result.Succeeded, result.StandardError);
+		Assert.Contains("eof", result.StandardOutput);
+	}
+
+	[TestMethod]
+	[OSCondition(OperatingSystems.Linux | OperatingSystems.OSX)]
+	[DataRow("before\\n\\377\\376\\nafter\\n", DisplayName = "invalid bytes among valid text")]
+	[DataRow("\\377\\376", DisplayName = "invalid bytes alone")]
+	public async Task RunAsync_OutputThatIsNotUtf8_IsReportedRatherThanReadAsEmptyOrReplaced(string printfFormat)
+	{
+		// An undecodable branch or path name must fail loudly. Read leniently it becomes a name that
+		// matches nothing, and read as nothing it becomes "no branches", both of which look like
+		// answers. POSIX only, because it needs a shell that can write raw bytes.
+		GitResult result = await Build("/bin/sh").RunAsync(
+			new GitInvocation { Arguments = ["-c", $"printf '{printfFormat}'"], Timeout = TimeSpan.FromSeconds(20) },
+			CancellationToken.None);
+
+		Assert.IsFalse(result.Succeeded);
+		Assert.IsFalse(result.TimedOut);
+		Assert.Contains("not valid UTF-8", result.StandardError);
+	}
+
+	private static string ReaderExecutable() => OnWindows ? "cmd.exe" : "/bin/sh";
+
+	private static string[] ReaderArguments() => OnWindows
+		? ["/c", "set /p line= & echo eof"]
+		: ["-c", "if read line; then echo \"read:$line\"; else echo eof; fi"];
 
 	[TestMethod]
 	public async Task RunAsync_ExceedingItsTimeout_ReportsTimedOutAndKillsTheTree()

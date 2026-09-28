@@ -19,6 +19,7 @@
     <PackageReference Include="Polyfill" PrivateAssets="all" />
     <PackageReference Include="ktsu.Essentials" />
     <PackageReference Include="ktsu.Essentials.FileSystemProviders.Native" />
+    <PackageReference Include="ktsu.RunCommand" />
     <PackageReference Include="ktsu.Semantics.Paths" />
     <!-- Used directly, so referenced explicitly rather than relied on transitively (KTSU0006):
          Semantics.Strings supplies the .As<T>() conversion, and the filesystem interface package

@@ -5,6 +5,7 @@
   <ItemGroup>
     <PackageVersion Include="Polyfill" Version="11.4.0" />
     <PackageVersion Include="ktsu.Essentials" Version="2.6.7" />
+    <PackageVersion Include="ktsu.RunCommand" Version="1.9.0" />
     <PackageVersion Include="ktsu.Essentials.FileSystemProviders.Native" Version="2.6.7" />
     <PackageVersion Include="ktsu.Semantics.Paths" Version="5.8.0" />
     <PackageVersion Include="ktsu.Semantics.Strings" Version="5.8.0" />
