@@ -79,6 +79,87 @@ public class BranchPatternTests
 	}
 
 	[TestMethod]
+	public void Matches_BracketRange_MatchesTheWayGitBranchListDoes()
+	{
+		// The shape a StatusBranchNamePatterns entry takes in the field. git branch --list honours the
+		// bracket expression, so the service has to, or those branches silently drop out of /state.
+		BranchPattern pattern = Parse("origin/release-[0-9]*");
+
+		Assert.IsTrue(pattern.Matches("origin/release-1.0"));
+		Assert.IsTrue(pattern.Matches("origin/release-2026"));
+		Assert.IsFalse(pattern.Matches("origin/release-x"));
+	}
+
+	[TestMethod]
+	public void Matches_BracketSet_MatchesAnyMember()
+	{
+		BranchPattern pattern = Parse("origin/[abc]");
+
+		Assert.IsTrue(pattern.Matches("origin/a"));
+		Assert.IsTrue(pattern.Matches("origin/c"));
+		Assert.IsFalse(pattern.Matches("origin/d"));
+		Assert.IsFalse(pattern.Matches("origin/ab"));
+	}
+
+	[TestMethod]
+	public void Matches_NegatedBracket_AcceptsBangAndCaret()
+	{
+		foreach (string text in new[] { "origin/[!x]y", "origin/[^x]y" })
+		{
+			BranchPattern pattern = Parse(text);
+
+			Assert.IsTrue(pattern.Matches("origin/ay"), text);
+			Assert.IsFalse(pattern.Matches("origin/xy"), text);
+		}
+	}
+
+	[TestMethod]
+	public void Matches_CloseBracketFirst_IsAMember()
+	{
+		Assert.IsTrue(Parse("a[]b]c").Matches("a]c"));
+		Assert.IsTrue(Parse("a[]b]c").Matches("abc"));
+		Assert.IsFalse(Parse("a[!]]c").Matches("a]c"));
+		Assert.IsTrue(Parse("a[!]]c").Matches("abc"));
+	}
+
+	[TestMethod]
+	public void Matches_DashAtEitherEnd_IsAMember()
+	{
+		Assert.IsTrue(Parse("v[-.]1").Matches("v-1"));
+		Assert.IsTrue(Parse("v[.-]1").Matches("v-1"));
+		Assert.IsFalse(Parse("v[.-]1").Matches("v/1"));
+	}
+
+	[TestMethod]
+	public void Matches_Backslash_EscapesTheNextCharacter()
+	{
+		Assert.IsTrue(Parse(@"origin/a\*b").Matches("origin/a*b"));
+		Assert.IsFalse(Parse(@"origin/a\*b").Matches("origin/axyb"));
+		Assert.IsTrue(Parse(@"origin/\[x]").Matches("origin/[x]"));
+		Assert.IsFalse(Parse(@"origin/\[x]").Matches("origin/x"));
+		Assert.IsTrue(Parse(@"origin/[\]]").Matches("origin/]"));
+	}
+
+	[TestMethod]
+	public void Matches_UnclosedBracket_IsLiteral()
+	{
+		Assert.IsTrue(Parse("origin/[main").Matches("origin/[main"));
+		Assert.IsFalse(Parse("origin/[main").Matches("origin/main"));
+	}
+
+	[TestMethod]
+	public void Matches_BracketAfterWildcard_BacktracksCorrectly() =>
+		Assert.IsTrue(Parse("*/v[0-9].[0-9]").Matches("origin/feature/v1.2"));
+
+	[TestMethod]
+	public void Matches_PathologicalBracketPattern_StillReturnsPromptly()
+	{
+		BranchPattern pattern = Parse(string.Concat(Enumerable.Repeat("*[a-y]", 40)) + "z");
+
+		Assert.IsFalse(pattern.Matches(new string('a', 4000)));
+	}
+
+	[TestMethod]
 	public void Matches_PathologicalPattern_StillReturnsPromptly()
 	{
 		// The shape that makes a naive regular expression translation catastrophic. This matcher
