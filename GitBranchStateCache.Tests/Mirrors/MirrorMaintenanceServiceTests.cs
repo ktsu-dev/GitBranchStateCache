@@ -228,6 +228,49 @@ public class MirrorMaintenanceServiceTests
 	}
 
 	[TestMethod]
+	public void Sweep_ARepositoryNamedMirrorStillBeingQueried_IsKept()
+	{
+		// studio/mirror is stored at studio/mirror.git/mirror.git. The outer directory never carries a
+		// marker, so if it were treated as a mirror it would look idle from the day it was created and
+		// be reaped along with the live mirror inside it.
+		(MirrorMaintenanceService service, MirrorStore store, MockFileSystem fileSystem, FakeTimeProvider time) =
+			Build(TimeSpan.FromDays(30));
+
+		string directory = Seed(store, fileSystem, "studio/mirror.git");
+
+		// The mock filesystem stamps creation times from the real clock, so pin the path segment's to
+		// the fake one or it never looks old enough to be reaped.
+		fileSystem.Directory.SetCreationTimeUtc(fileSystem.Path.GetDirectoryName(directory)!, time.GetUtcNow().UtcDateTime);
+		time.Advance(TimeSpan.FromDays(40));
+		store.MarkFetched(directory);
+		store.MarkUsed(directory);
+
+		service.Sweep();
+
+		Assert.IsTrue(store.Exists(directory));
+	}
+
+	[TestMethod]
+	public void Sweep_AnIdleMirrorHoldingALiveMirror_IsKept()
+	{
+		// studio is mirrored at studio/mirror.git and studio/mirror inside it. Reaping the idle outer
+		// mirror would delete the inner one too.
+		(MirrorMaintenanceService service, MirrorStore store, MockFileSystem fileSystem, FakeTimeProvider time) =
+			Build(TimeSpan.FromDays(30));
+
+		string outer = Seed(store, fileSystem, "studio");
+		store.MarkUsed(outer);
+		string inner = Seed(store, fileSystem, "studio/mirror.git");
+		time.Advance(TimeSpan.FromDays(40));
+		store.MarkUsed(inner);
+
+		service.Sweep();
+
+		Assert.IsTrue(store.Exists(outer));
+		Assert.IsTrue(store.Exists(inner));
+	}
+
+	[TestMethod]
 	public void Sweep_LeavesTheMirrorsThatAreStillWanted()
 	{
 		(MirrorMaintenanceService service, MirrorStore store, MockFileSystem fileSystem, FakeTimeProvider time) =

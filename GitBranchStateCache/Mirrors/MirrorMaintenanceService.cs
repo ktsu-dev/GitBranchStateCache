@@ -70,7 +70,13 @@ public sealed class MirrorMaintenanceService(
 
 		foreach (string directory in directories)
 		{
+			// A mirror can sit inside another when a repository path runs through a mirror.git segment
+			// of a repository that is itself mirrored. Deleting the outer one would take the inner one
+			// with it, however recently that was used, so it waits until the inner one has gone.
+			string[] nested = [.. directories.Where(other => MirrorStore.IsInside(other, directory))];
+
 			if (settings.MirrorIdleMaxAge > TimeSpan.Zero
+				&& nested.Length == 0
 				&& LastTouched(directory) is DateTimeOffset touched
 				&& now - touched > settings.MirrorIdleMaxAge)
 			{
@@ -78,7 +84,7 @@ public sealed class MirrorMaintenanceService(
 				continue;
 			}
 
-			bytes += Measure(directory);
+			bytes += Measure(directory, nested);
 			kept++;
 		}
 
@@ -139,12 +145,14 @@ public sealed class MirrorMaintenanceService(
 		}
 	}
 
-	private long Measure(string directory)
+	private long Measure(string directory, string[] nested)
 	{
 		try
 		{
+			// Files belonging to a mirror nested inside this one are counted when that mirror is.
 			return fileSystem.Directory
 				.GetFiles(directory, "*", SearchOption.AllDirectories)
+				.Where(file => !nested.Any(inner => MirrorStore.IsInside(file, inner)))
 				.Sum(file => fileSystem.FileInfo.New(file).Length);
 		}
 		catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
