@@ -1,8 +1,7 @@
-## v1.0.32 (patch)
+## v1.0.33-pre.1 (prerelease)
 
-Changes since v1.0.31:
+Changes since v1.0.32:
 
-- Read a bracket member's range in its own helper ([@Claude](https://github.com/Claude))
-- fix: stop the idle-mirror sweep reaping a live mirror under a mirror.git path segment [patch] ([@Claude](https://github.com/Claude))
-- fix: honour [...] bracket expressions and backslash escapes in branch patterns [patch] ([@Claude](https://github.com/Claude))
+- Bump Polyfill from 11.4.0 to 11.4.1 ([@dependabot[bot]](https://github.com/dependabot[bot]))
+- Bump the ktsu group with 4 updates ([@dependabot[bot]](https://github.com/dependabot[bot]))
 
