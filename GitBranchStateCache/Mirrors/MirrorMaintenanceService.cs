@@ -58,7 +58,16 @@ public sealed class MirrorMaintenanceService(
 	}
 
 	/// <summary>
-	/// Measures every mirror and reaps the idle ones.
+	/// How much longer than the longest possible clone a staging directory must be left alone.
+	/// </summary>
+	/// <remarks>
+	/// Covers the time a timed-out git process takes to be killed and the clone's own bookkeeping
+	/// either side of it, so that a clone near the end of its timeout is never swept from under it.
+	/// </remarks>
+	private static readonly TimeSpan StagingMargin = TimeSpan.FromMinutes(10);
+
+	/// <summary>
+	/// Removes abandoned clone staging directories, then measures every mirror and reaps the idle ones.
 	/// </summary>
 	internal void Sweep()
 	{
@@ -67,6 +76,8 @@ public sealed class MirrorMaintenanceService(
 		DateTimeOffset now = timeProvider.GetUtcNow();
 		long bytes = 0;
 		int kept = 0;
+
+		SweepStaging(settings, directories, now);
 
 		foreach (string directory in directories)
 		{
@@ -90,6 +101,58 @@ public sealed class MirrorMaintenanceService(
 
 		metrics.RecordMirrorBytes(bytes);
 		ReadinessLog.ReportedMirrorSize(logger, bytes, kept);
+	}
+
+	/// <summary>
+	/// Removes the staging directories of clones that can no longer be running.
+	/// </summary>
+	/// <remarks>
+	/// A clone stages into a directory beside its mirror and discards it in a <c>finally</c>, which
+	/// never runs when the process is killed partway through: an OOM kill, an eviction or a rollout
+	/// during the clone of a large repository. The partial clone, possibly gigabytes, would otherwise
+	/// stay on the volume for good, and uncounted, since it is not a mirror.
+	/// <para>
+	/// A clone runs for at most <see cref="GitBranchStateCacheOptions.FetchTimeout"/> and then
+	/// configures the result within <see cref="GitBranchStateCacheOptions.ProbeTimeout"/>, so a staging
+	/// directory older than both, plus a margin, belongs to no clone still running. Age is the later of
+	/// creation and last write, so a filesystem that cannot report creation times errs towards keeping.
+	/// This runs whether or not idle mirrors are reaped, because keeping every mirror is not a reason
+	/// to keep what is not one.
+	/// </para>
+	/// </remarks>
+	private void SweepStaging(GitBranchStateCacheOptions settings, IReadOnlyList<string> directories, DateTimeOffset now)
+	{
+		TimeSpan maxAge = settings.FetchTimeout + settings.ProbeTimeout + StagingMargin;
+
+		foreach (string staging in mirrors.EnumerateStaging())
+		{
+			// A mirror inside means this is a repository path segment that happens to share the name,
+			// not a staging directory.
+			if (directories.Any(directory => MirrorStore.IsInside(directory, staging)))
+			{
+				continue;
+			}
+
+			try
+			{
+				IDirectoryInfo info = fileSystem.DirectoryInfo.New(staging);
+				DateTime touched = info.CreationTimeUtc > info.LastWriteTimeUtc
+					? info.CreationTimeUtc
+					: info.LastWriteTimeUtc;
+
+				if (now - new DateTimeOffset(touched, TimeSpan.Zero) <= maxAge)
+				{
+					continue;
+				}
+
+				mirrors.Delete(staging);
+				MirrorLog.SweptStaging(logger, staging);
+			}
+			catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
+			{
+				MirrorLog.SweepStagingFailed(logger, failure, staging);
+			}
+		}
 	}
 
 	/// <summary>

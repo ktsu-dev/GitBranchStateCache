@@ -57,6 +57,17 @@ public interface IMirrorStore
 	/// <returns>The directories.</returns>
 	public IReadOnlyList<string> Enumerate();
 
+	/// <summary>
+	/// Lists every directory a clone is staging into, or was when it died.
+	/// </summary>
+	/// <remarks>
+	/// A clone is written beside its mirror under a name only a clone uses, and moved into place when it
+	/// finishes. One whose process was killed first is never moved or removed by that clone, so it is
+	/// left for the maintenance sweep, which is the only thing that looks for it.
+	/// </remarks>
+	/// <returns>The directories.</returns>
+	public IReadOnlyList<string> EnumerateStaging();
+
 	/// <summary>Removes a mirror and everything under it.</summary>
 	/// <param name="directory">The mirror directory.</param>
 	public void Delete(string directory);
