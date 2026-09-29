@@ -1,6 +1,7 @@
-## v1.0.34 (patch)
+## v1.0.35 (patch)
 
-Changes since v1.0.33:
+Changes since v1.0.34:
 
-- Move CI onto the shared ci-shared.yml pipeline ([@Claude](https://github.com/Claude))
+- fix: sweep staging directories left by clones that never finished [patch] ([@Claude](https://github.com/Claude))
+- fix: make --allow replace an upstream's configured allow-list [patch] ([@Claude](https://github.com/Claude))
 
