@@ -2,9 +2,11 @@
 
 namespace ktsu.GitBranchStateCache.Git;
 
-using System.Diagnostics;
 using System.Text;
 using ktsu.GitBranchStateCache.Configuration;
+using ktsu.RunCommand;
+using ktsu.Semantics.Paths;
+using ktsu.Semantics.Strings;
 using Microsoft.Extensions.Options;
 
 /// <summary>
@@ -37,16 +39,6 @@ using Microsoft.Extensions.Options;
 public sealed class GitRunner(IOptions<GitBranchStateCacheOptions> options) : IGitRunner
 {
 	/// <summary>
-	/// How long the output streams are drained for after a kill before they are given up on.
-	/// </summary>
-	/// <remarks>
-	/// A killed process closes its pipes, so this normally completes immediately. It is bounded
-	/// because a grandchild that inherited the pipe and outlived the kill would otherwise hold the
-	/// read open, and this path already runs on a request that is being abandoned.
-	/// </remarks>
-	private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(5);
-
-	/// <summary>
 	/// Decodes git output strictly, so an undecodable path fails loudly instead of being replaced.
 	/// </summary>
 	/// <remarks>
@@ -59,19 +51,40 @@ public sealed class GitRunner(IOptions<GitBranchStateCacheOptions> options) : IG
 		throwOnInvalidBytes: true);
 
 	/// <inheritdoc />
+	/// <remarks>
+	/// Starting, reading and killing the process is <see cref="RunCommand.ExecuteAsync(string, IEnumerable{string}, OutputHandler, CommandOptions, CancellationToken)"/>'s
+	/// job: it kills the whole tree on cancellation, because git delegates transport to a helper child
+	/// that would otherwise be left holding a connection and a pipe, and it stops reading once the
+	/// process is gone rather than waiting on a pipe a surviving grandchild may hold open. What stays
+	/// here is what is particular to git: the environment, and telling this service's own timeout
+	/// apart from the caller giving up.
+	/// </remarks>
 	public async Task<GitResult> RunAsync(GitInvocation invocation, CancellationToken cancellationToken)
 	{
 		Ensure.NotNull(invocation);
 
-		using Process process = new() { StartInfo = BuildStartInfo(invocation) };
-		process.Start();
+		GitBranchStateCacheOptions settings = options.Value;
 
-		// git is never fed anything, and a child holding an open stdin it is waiting on is a hang
-		// rather than an error.
-		process.StandardInput.Close();
+		StringBuilder standardOutput = new();
+		StringBuilder standardError = new();
+		OutputHandler output = new(
+			chunk => standardOutput.Append(chunk),
+			chunk => standardError.Append(chunk),
+			StrictUtf8);
 
-		Task<string> standardOutput = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
-		Task<string> standardError = process.StandardError.ReadToEndAsync(CancellationToken.None);
+		CommandOptions commandOptions = new()
+		{
+			// Resolved here because the option only takes an absolute path, and a relative one has always
+			// meant relative to this process's current directory.
+			WorkingDirectory = invocation.WorkingDirectory is null
+				? null
+				: Path.GetFullPath(invocation.WorkingDirectory).As<AbsoluteDirectoryPath>(),
+			EnvironmentVariables = BuildEnvironment(invocation, settings, Environment.GetEnvironmentVariables()),
+
+			// git is never fed anything, and a child holding an open stdin it is waiting on is a hang
+			// rather than an error.
+			StandardInput = StandardInputMode.Closed,
+		};
 
 		using CancellationTokenSource timeout = new(invocation.Timeout);
 		using CancellationTokenSource linked =
@@ -79,29 +92,24 @@ public sealed class GitRunner(IOptions<GitBranchStateCacheOptions> options) : IG
 
 		try
 		{
-			await process.WaitForExitAsync(linked.Token).ConfigureAwait(false);
+			int exitCode = await RunCommand.ExecuteAsync(
+				settings.GitExecutable,
+				invocation.Arguments,
+				output,
+				commandOptions,
+				linked.Token).ConfigureAwait(false);
+
+			return new GitResult(exitCode, standardOutput.ToString(), standardError.ToString(), TimedOut: false);
 		}
 		catch (OperationCanceledException)
 		{
-			Kill(process);
-			await DrainAsync(standardOutput, standardError).ConfigureAwait(false);
-
 			// A timeout is this service's own decision and has an answer to report. A cancellation is
 			// the caller giving up, and there is nobody left to report anything to.
 			cancellationToken.ThrowIfCancellationRequested();
 
 			return new GitResult(-1, string.Empty, "The git command exceeded its timeout.", TimedOut: true);
 		}
-
-		try
-		{
-			return new GitResult(
-				process.ExitCode,
-				await standardOutput.ConfigureAwait(false),
-				await standardError.ConfigureAwait(false),
-				TimedOut: false);
-		}
-		catch (DecoderFallbackException)
+		catch (Exception failure) when (IsDecodeFailure(failure))
 		{
 			return new GitResult(
 				-1,
@@ -112,118 +120,67 @@ public sealed class GitRunner(IOptions<GitBranchStateCacheOptions> options) : IG
 	}
 
 	/// <summary>
-	/// Kills the process and everything it started.
+	/// Whether a failure is the strict encoding refusing git's output.
 	/// </summary>
 	/// <remarks>
-	/// The tree, not just the process: git delegates transport to a helper child, and killing only the
-	/// parent leaves that helper holding a connection and a pipe. Leaking those is the most likely
-	/// operational failure of a service shaped like this.
+	/// The output is read on background tasks, so the decoder's exception can arrive wrapped.
 	/// </remarks>
-	private static void Kill(Process process)
+	private static bool IsDecodeFailure(Exception failure) => failure switch
 	{
-		try
-		{
-			if (!process.HasExited)
-			{
-				process.Kill(entireProcessTree: true);
-			}
-		}
-		catch (InvalidOperationException)
-		{
-			// The process exited between the check and the kill. Nothing left to do.
-		}
-		catch (NotSupportedException)
-		{
-			// Killing a tree is unsupported on this platform, and the process is already gone or will
-			// be reaped when its handle is disposed.
-		}
-	}
-
-	private static async Task DrainAsync(Task<string> standardOutput, Task<string> standardError)
-	{
-		try
-		{
-			await Task.WhenAll(standardOutput, standardError).WaitAsync(DrainTimeout).ConfigureAwait(false);
-		}
-		catch (Exception failure) when (failure is TimeoutException or DecoderFallbackException)
-		{
-			// The output of a killed command is not reported, so failing to read it changes nothing.
-		}
-	}
-
-	private ProcessStartInfo BuildStartInfo(GitInvocation invocation)
-	{
-		GitBranchStateCacheOptions settings = options.Value;
-
-		ProcessStartInfo startInfo = new()
-		{
-			FileName = settings.GitExecutable,
-			UseShellExecute = false,
-			CreateNoWindow = true,
-			RedirectStandardInput = true,
-			RedirectStandardOutput = true,
-			RedirectStandardError = true,
-			StandardOutputEncoding = StrictUtf8,
-			StandardErrorEncoding = StrictUtf8,
-		};
-
-		if (invocation.WorkingDirectory is not null)
-		{
-			startInfo.WorkingDirectory = invocation.WorkingDirectory;
-		}
-
-		foreach (string argument in invocation.Arguments)
-		{
-			startInfo.ArgumentList.Add(argument);
-		}
-
-		ApplyEnvironment(startInfo, invocation, settings);
-		return startInfo;
-	}
+		DecoderFallbackException => true,
+		AggregateException aggregate => aggregate.Flatten().InnerExceptions.Any(IsDecodeFailure),
+		_ => failure.InnerException is not null && IsDecodeFailure(failure.InnerException),
+	};
 
 	/// <summary>
-	/// Applies the environment every run gets, including the caller's credential.
+	/// Builds the environment every run gets, including the caller's credential, as an overlay on the
+	/// environment the child would otherwise inherit.
 	/// </summary>
 	/// <remarks>
 	/// Internal so the tests can assert on the environment directly. What it puts where is the whole
 	/// of this class's security posture, and asserting it through the behaviour of a child process
 	/// would only ever cover the parts a child happens to report.
 	/// </remarks>
-	/// <param name="startInfo">The process being prepared.</param>
 	/// <param name="invocation">What is being run.</param>
 	/// <param name="settings">The configured options.</param>
-	internal static void ApplyEnvironment(
-		ProcessStartInfo startInfo,
+	/// <param name="inherited">The environment the child would otherwise inherit.</param>
+	/// <returns>The variables to set, with a null value for each inherited variable to remove.</returns>
+	internal static Dictionary<string, string?> BuildEnvironment(
 		GitInvocation invocation,
-		GitBranchStateCacheOptions settings)
+		GitBranchStateCacheOptions settings,
+		System.Collections.IDictionary inherited)
 	{
-		foreach (string inherited in startInfo.Environment.Keys
-			.Where(key => key.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase))
-			.ToArray())
+		Ensure.NotNull(inherited);
+
+		Dictionary<string, string?> environment = new(StringComparer.OrdinalIgnoreCase);
+
+		foreach (string name in inherited.Keys.OfType<string>()
+			.Where(key => key.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase)))
 		{
-			startInfo.Environment.Remove(inherited);
+			environment[name] = null;
 		}
 
-		startInfo.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
-		startInfo.Environment["GIT_CONFIG_GLOBAL"] = GlobalConfigPath(settings);
+		environment["GIT_CONFIG_NOSYSTEM"] = "1";
+		environment["GIT_CONFIG_GLOBAL"] = GlobalConfigPath(settings);
 
 		// No prompting, ever. Without this a missing or refused credential turns a request into a
 		// process waiting on a terminal that is not there, which presents as a hang rather than a 401.
-		startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
-		startInfo.Environment["GCM_INTERACTIVE"] = "never";
+		environment["GIT_TERMINAL_PROMPT"] = "0";
+		environment["GCM_INTERACTIVE"] = "never";
 
 		// The mirrors are blobless, and nothing this service runs reads file content. If some future
 		// operation does, this turns it into a visible error during testing rather than an enormous
 		// unplanned fetch in production.
-		startInfo.Environment["GIT_NO_LAZY_FETCH"] = "1";
+		environment["GIT_NO_LAZY_FETCH"] = "1";
 
-		ApplyConfigEnvironment(startInfo, invocation);
+		ApplyConfigEnvironment(environment, invocation);
+		return environment;
 	}
 
 	/// <summary>
 	/// Hands git its per-run configuration, including the caller's credential, through the environment.
 	/// </summary>
-	private static void ApplyConfigEnvironment(ProcessStartInfo startInfo, GitInvocation invocation)
+	private static void ApplyConfigEnvironment(Dictionary<string, string?> environment, GitInvocation invocation)
 	{
 		List<KeyValuePair<string, string>> entries =
 		[
@@ -242,12 +199,12 @@ public sealed class GitRunner(IOptions<GitBranchStateCacheOptions> options) : IG
 				$"Authorization: {authorization}"));
 		}
 
-		startInfo.Environment["GIT_CONFIG_COUNT"] = entries.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+		environment["GIT_CONFIG_COUNT"] = entries.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
 		for (int index = 0; index < entries.Count; index++)
 		{
-			startInfo.Environment[$"GIT_CONFIG_KEY_{index}"] = entries[index].Key;
-			startInfo.Environment[$"GIT_CONFIG_VALUE_{index}"] = entries[index].Value;
+			environment[$"GIT_CONFIG_KEY_{index}"] = entries[index].Key;
+			environment[$"GIT_CONFIG_VALUE_{index}"] = entries[index].Value;
 		}
 	}
 
