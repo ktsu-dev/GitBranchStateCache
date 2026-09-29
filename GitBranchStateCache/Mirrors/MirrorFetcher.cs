@@ -134,7 +134,7 @@ public sealed class MirrorFetcher(
 
 		fileSystem.Directory.CreateDirectory(parent);
 
-		string staging = fileSystem.Path.Combine(parent, $"{MirrorStore.MirrorDirectoryName}.tmp-{Guid.NewGuid():N}");
+		string staging = fileSystem.Path.Combine(parent, $"{MirrorStore.StagingPrefix}{Guid.NewGuid():N}");
 
 		metrics.RecordClone(key.Upstream);
 		MirrorLog.Cloning(logger, key.RepositoryPath, key.Upstream);

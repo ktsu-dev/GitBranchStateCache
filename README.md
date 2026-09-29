@@ -162,7 +162,7 @@ Startup validation refuses to run with no upstreams, an upstream with an empty o
 
 Deploy **adjacent to the forge, not on-premises**. Its cost is round trips and its clients are worst served on residential links, which is the opposite placement from an object cache. `deploy/k8s` is a kustomize base: a StatefulSet with a read-write-once volume, a service, an ingress and a configmap. Start at one replica; each replica holds its own mirrors and diff cache, so replicas multiply fetch traffic and disk without improving the hit rate.
 
-The volume is sized by the allow-list rather than by traffic, which is what makes it possible to provision in advance. Mirrors that go unqueried for longer than `MirrorIdleMaxAge` are deleted, because a deleted mirror costs one clone if it is asked for again, which is the cheapest possible way to be wrong.
+The volume is sized by the allow-list rather than by traffic, which is what makes it possible to provision in advance. Mirrors that go unqueried for longer than `MirrorIdleMaxAge` are deleted, because a deleted mirror costs one clone if it is asked for again, which is the cheapest possible way to be wrong. The same sweep removes the partial clone a killed process leaves behind (`mirror.git.tmp-*`), once it is older than `FetchTimeout` plus `ProbeTimeout` plus ten minutes and so cannot belong to a clone still running.
 
 ## Instrumentation
 

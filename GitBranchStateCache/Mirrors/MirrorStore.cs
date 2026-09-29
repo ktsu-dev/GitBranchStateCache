@@ -30,6 +30,12 @@ public sealed class MirrorStore(
 	/// <summary>The directory name every mirror repository has.</summary>
 	internal const string MirrorDirectoryName = "mirror.git";
 
+	/// <summary>What a clone's staging directory is named before the suffix that makes it unique.</summary>
+	internal const string StagingPrefix = MirrorDirectoryName + ".tmp-";
+
+	/// <summary>The length of the unique suffix: a GUID written as 32 hexadecimal digits.</summary>
+	private const int StagingSuffixLength = 32;
+
 	private const string FetchedMarker = ".refs-fetched-at";
 	private const string UsedMarker = ".last-used";
 
@@ -110,6 +116,36 @@ public sealed class MirrorStore(
 
 		return [.. candidates.Where(candidate => !IsRepositoryPathSegment(candidate, candidates))];
 	}
+
+	/// <inheritdoc />
+	/// <remarks>
+	/// Matched on the whole name a clone gives its staging directory, the prefix and a GUID's 32
+	/// hexadecimal digits, rather than on the prefix alone. A repository path segment may begin
+	/// <c>mirror.git.tmp-</c> too, and that directory holds live mirrors.
+	/// </remarks>
+	public IReadOnlyList<string> EnumerateStaging()
+	{
+		string root = options.Value.MirrorRoot;
+
+		if (!fileSystem.Directory.Exists(root))
+		{
+			return [];
+		}
+
+		return [.. fileSystem.Directory
+			.GetDirectories(root, StagingPrefix + "*", SearchOption.AllDirectories)
+			.Where(candidate => IsStagingName(fileSystem.Path.GetFileName(candidate)))];
+	}
+
+	/// <summary>
+	/// Reports whether a directory name is one a clone gives its staging directory.
+	/// </summary>
+	/// <param name="name">The directory name.</param>
+	/// <returns><see langword="true"/> when it is the staging prefix followed by 32 hexadecimal digits.</returns>
+	internal static bool IsStagingName(string name) =>
+		name.Length == StagingPrefix.Length + StagingSuffixLength
+		&& name.StartsWith(StagingPrefix, StringComparison.Ordinal)
+		&& name[StagingPrefix.Length..].All(char.IsAsciiHexDigit);
 
 	/// <summary>
 	/// Reports whether a path lies strictly inside a directory.

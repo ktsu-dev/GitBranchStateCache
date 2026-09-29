@@ -44,4 +44,16 @@ internal static partial class MirrorLog
 		Level = LogLevel.Warning,
 		Message = "Could not remove the idle mirror at '{Directory}'.")]
 	public static partial void ReapFailed(ILogger logger, Exception exception, string directory);
+
+	[LoggerMessage(
+		EventId = 1006,
+		Level = LogLevel.Information,
+		Message = "Removed the staging directory '{Staging}', left by a clone that did not finish.")]
+	public static partial void SweptStaging(ILogger logger, string staging);
+
+	[LoggerMessage(
+		EventId = 1007,
+		Level = LogLevel.Warning,
+		Message = "Could not remove the staging directory '{Staging}', left by a clone that did not finish.")]
+	public static partial void SweepStagingFailed(ILogger logger, Exception exception, string staging);
 }

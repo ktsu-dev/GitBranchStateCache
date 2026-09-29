@@ -288,4 +288,115 @@ public class MirrorMaintenanceServiceTests
 		Assert.IsFalse(store.Exists(idle));
 		Assert.IsTrue(store.Exists(busy));
 	}
+
+	/// <summary>
+	/// Leaves a clone's staging directory beside where its mirror would go, dated as the clone started.
+	/// </summary>
+	private static string SeedStaging(MirrorStore store, MockFileSystem fileSystem, string repositoryPath, DateTimeOffset startedAt)
+	{
+		store.TryResolve(new MirrorKey("github", repositoryPath), out string? directory);
+		string staging = $"{directory}.tmp-{Guid.NewGuid():N}";
+		fileSystem.Directory.CreateDirectory(fileSystem.Path.Combine(staging, "objects"));
+		fileSystem.File.WriteAllText(fileSystem.Path.Combine(staging, "objects", "pack"), "partial clone");
+		fileSystem.Directory.SetCreationTimeUtc(staging, startedAt.UtcDateTime);
+		fileSystem.Directory.SetLastWriteTimeUtc(staging, startedAt.UtcDateTime);
+		return staging;
+	}
+
+	[TestMethod]
+	public void Sweep_AStagingDirectoryLeftByADeadClone_IsRemoved()
+	{
+		// A process killed mid-clone never runs the finally that discards its staging directory, and
+		// nothing else would ever look for it.
+		(MirrorMaintenanceService service, MirrorStore store, MockFileSystem fileSystem, FakeTimeProvider time) =
+			Build();
+
+		string staging = SeedStaging(store, fileSystem, "studio/game.git", time.GetUtcNow());
+		time.Advance(TimeSpan.FromDays(1));
+
+		service.Sweep();
+
+		Assert.IsFalse(fileSystem.Directory.Exists(staging));
+	}
+
+	[TestMethod]
+	public void Sweep_WithReapingDisabled_StillRemovesADeadClonesStagingDirectory()
+	{
+		// Keeping every mirror is a choice about mirrors. A staging directory is not one.
+		(MirrorMaintenanceService service, MirrorStore store, MockFileSystem fileSystem, FakeTimeProvider time) =
+			Build(TimeSpan.Zero);
+
+		string staging = SeedStaging(store, fileSystem, "studio/game.git", time.GetUtcNow());
+		time.Advance(TimeSpan.FromDays(1));
+
+		service.Sweep();
+
+		Assert.IsFalse(fileSystem.Directory.Exists(staging));
+	}
+
+	[TestMethod]
+	public void Sweep_AStagingDirectoryOfACloneStillRunning_IsKept()
+	{
+		// A clone may run for the whole of FetchTimeout, so its staging directory is live until then.
+		(MirrorMaintenanceService service, MirrorStore store, MockFileSystem fileSystem, FakeTimeProvider time) =
+			Build();
+
+		string staging = SeedStaging(store, fileSystem, "studio/game.git", time.GetUtcNow());
+		time.Advance(new GitBranchStateCacheOptions().FetchTimeout);
+
+		service.Sweep();
+
+		Assert.IsTrue(fileSystem.Directory.Exists(staging));
+	}
+
+	[TestMethod]
+	public void Sweep_ARepositoryPathSegmentThatLooksLikeStaging_IsKept()
+	{
+		// Only the exact name a clone gives its staging directory counts. A repository path segment
+		// that merely starts the same way holds a live mirror.
+		(MirrorMaintenanceService service, MirrorStore store, MockFileSystem fileSystem, FakeTimeProvider time) =
+			Build();
+
+		string directory = Seed(store, fileSystem, "studio/mirror.git.tmp-old/game.git");
+		store.MarkUsed(directory);
+		time.Advance(TimeSpan.FromDays(1));
+		store.MarkUsed(directory);
+
+		service.Sweep();
+
+		Assert.IsTrue(store.Exists(directory));
+	}
+
+	[TestMethod]
+	public void EnumerateStaging_FindsOnlyCloneStagingDirectories()
+	{
+		(_, MirrorStore store, MockFileSystem fileSystem, FakeTimeProvider time) = Build();
+
+		string staging = SeedStaging(store, fileSystem, "studio/game.git", time.GetUtcNow());
+		Seed(store, fileSystem, "studio/tools.git");
+		Seed(store, fileSystem, "studio/mirror.git.tmp-notaguid/game.git");
+
+		CollectionAssert.AreEqual(new[] { staging }, store.EnumerateStaging().ToArray());
+	}
+
+	[TestMethod]
+	public void Sweep_AStagingNamedDirectoryHoldingAMirror_IsKept()
+	{
+		// However unlikely the name, a directory with a mirror inside it is a repository path segment,
+		// and deleting it would take a live mirror with it.
+		(MirrorMaintenanceService service, MirrorStore store, MockFileSystem fileSystem, FakeTimeProvider time) =
+			Build();
+
+		string segment = $"mirror.git.tmp-{Guid.NewGuid():N}";
+		string directory = Seed(store, fileSystem, $"studio/{segment}/game.git");
+		string parent = fileSystem.Path.GetDirectoryName(directory)!;
+		fileSystem.Directory.SetCreationTimeUtc(parent, time.GetUtcNow().UtcDateTime);
+		fileSystem.Directory.SetLastWriteTimeUtc(parent, time.GetUtcNow().UtcDateTime);
+		time.Advance(TimeSpan.FromDays(1));
+		store.MarkUsed(directory);
+
+		service.Sweep();
+
+		Assert.IsTrue(store.Exists(directory));
+	}
 }
