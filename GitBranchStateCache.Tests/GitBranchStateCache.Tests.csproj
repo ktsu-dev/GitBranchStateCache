@@ -30,5 +30,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\GitBranchStateCache\GitBranchStateCache.csproj" />
+    <ProjectReference Include="..\GitBranchStateCache.Tool\GitBranchStateCache.Tool.csproj" />
   </ItemGroup>
 </Project>
