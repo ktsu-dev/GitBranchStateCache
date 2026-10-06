@@ -40,6 +40,12 @@ public sealed class AdmissionGate(
 	/// Matched to choose a status code and nothing else. Every branch of this refuses; the only
 	/// question is whether the caller is told to fix their credential or that the forge could not be
 	/// reached, and getting that wrong costs a confusing message rather than an incorrect decision.
+	/// <para>
+	/// A status code is only matched in git's own phrasing, never as bare digits. Git echoes the
+	/// repository URL in almost every failure, so a bare <c>"401"</c> would read a DNS or proxy failure
+	/// for <c>studio/game-401.git</c> as a refused credential, and Azure DevOps's
+	/// <c>TF401019</c> "repository does not exist" as one too.
+	/// </para>
 	/// </remarks>
 	private static readonly string[] AuthenticationMarkers =
 	[
@@ -48,8 +54,10 @@ public sealed class AdmissionGate(
 		"could not read password",
 		"invalid username or password",
 		"http basic: access denied",
-		"403",
-		"401",
+		"returned error: 401",
+		"returned error: 403",
+		"http 401",
+		"http 403",
 	];
 
 	/// <summary>
