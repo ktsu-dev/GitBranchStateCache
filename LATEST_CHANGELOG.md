@@ -1,6 +1,6 @@
-## v1.0.36-pre.3 (prerelease)
+## v1.0.36 (patch)
 
-Changes since v1.0.36-pre.2:
+Changes since v1.0.35:
 
-- Bump Polyfill from 11.4.1 to 11.4.3 ([@dependabot[bot]](https://github.com/dependabot[bot]))
+- Match 401/403 only in git's own phrasing when classifying a refused probe [patch] ([@Claude](https://github.com/Claude))
 
