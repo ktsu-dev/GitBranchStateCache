@@ -1,6 +1,6 @@
-## v1.0.36 (patch)
+## v1.0.37-pre.1 (prerelease)
 
-Changes since v1.0.35:
+Changes since v1.0.36:
 
-- Match 401/403 only in git's own phrasing when classifying a refused probe [patch] ([@Claude](https://github.com/Claude))
+- Bump the ktsu group with 3 updates ([@dependabot[bot]](https://github.com/dependabot[bot]))
 
