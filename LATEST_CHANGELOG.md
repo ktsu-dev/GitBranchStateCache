@@ -1,6 +1,7 @@
-## v1.0.37-pre.1 (prerelease)
+## v1.0.37-pre.2 (prerelease)
 
-Changes since v1.0.36:
+Changes since v1.0.37-pre.1:
 
-- Bump the ktsu group with 3 updates ([@dependabot[bot]](https://github.com/dependabot[bot]))
+- Bump MSTest.Sdk from 4.4.1 to 4.5.1 ([@dependabot[bot]](https://github.com/dependabot[bot]))
+- Bump the ktsu group with 4 updates ([@dependabot[bot]](https://github.com/dependabot[bot]))
 
