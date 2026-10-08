@@ -1,6 +1,6 @@
-## v1.0.37 (patch)
+## v1.0.38-pre.1 (prerelease)
 
-Changes since v1.0.36:
+Changes since v1.0.37:
 
-- Keep a coalesced clone or fetch running when the request that started it disconnects [patch] ([@Claude](https://github.com/Claude))
+- Bump the ktsu group with 4 updates ([@dependabot[bot]](https://github.com/dependabot[bot]))
 
