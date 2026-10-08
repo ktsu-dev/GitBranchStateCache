@@ -1,7 +1,6 @@
-## v1.0.37-pre.2 (prerelease)
+## v1.0.37 (patch)
 
-Changes since v1.0.37-pre.1:
+Changes since v1.0.36:
 
-- Bump MSTest.Sdk from 4.4.1 to 4.5.1 ([@dependabot[bot]](https://github.com/dependabot[bot]))
-- Bump the ktsu group with 4 updates ([@dependabot[bot]](https://github.com/dependabot[bot]))
+- Keep a coalesced clone or fetch running when the request that started it disconnects [patch] ([@Claude](https://github.com/Claude))
 
