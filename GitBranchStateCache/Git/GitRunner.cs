@@ -50,6 +50,14 @@ public sealed class GitRunner(IOptions<GitBranchStateCacheOptions> options) : IG
 		encoderShouldEmitUTF8Identifier: false,
 		throwOnInvalidBytes: true);
 
+	/// <summary>
+	/// Decodes the output of a run whose standard output is discarded, where only standard error is
+	/// kept and it is only ever shown or searched for git's own ASCII messages.
+	/// </summary>
+	private static readonly Encoding LenientUtf8 = new UTF8Encoding(
+		encoderShouldEmitUTF8Identifier: false,
+		throwOnInvalidBytes: false);
+
 	/// <inheritdoc />
 	/// <remarks>
 	/// Starting, reading and killing the process is <see cref="RunCommand.ExecuteAsync(string, IEnumerable{string}, OutputHandler, CommandOptions, CancellationToken)"/>'s
@@ -67,10 +75,15 @@ public sealed class GitRunner(IOptions<GitBranchStateCacheOptions> options) : IG
 
 		StringBuilder standardOutput = new();
 		StringBuilder standardError = new();
-		OutputHandler output = new(
-			chunk => standardOutput.Append(chunk),
-			chunk => standardError.Append(chunk),
-			StrictUtf8);
+		OutputHandler output = invocation.DiscardStandardOutput
+			? new(
+				_ => { },
+				chunk => standardError.Append(chunk),
+				LenientUtf8)
+			: new(
+				chunk => standardOutput.Append(chunk),
+				chunk => standardError.Append(chunk),
+				StrictUtf8);
 
 		CommandOptions commandOptions = new()
 		{
