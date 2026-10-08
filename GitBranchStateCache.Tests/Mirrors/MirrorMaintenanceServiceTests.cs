@@ -81,6 +81,7 @@ public class MirrorMaintenanceServiceTests
 			new BranchStateMetrics(meterFactory),
 			options,
 			time,
+			new FakeHostApplicationLifetime(),
 			NullLogger<MirrorFetcher>.Instance);
 	}
 

@@ -7,6 +7,7 @@ using ktsu.GitBranchStateCache.Coalescing;
 using ktsu.GitBranchStateCache.Configuration;
 using ktsu.GitBranchStateCache.Git;
 using ktsu.GitBranchStateCache.Observability;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -20,6 +21,13 @@ using Microsoft.Extensions.Options;
 /// LFS the large assets are pointer files of a hundred or so bytes each, so the git object store was
 /// never carrying the bulk anyway.
 /// <para>
+/// A clone or fetch is shared by every request coalesced onto it, so it runs under the service's own
+/// lifetime rather than under the request that happened to start it. Each request waits on it with its
+/// own disconnect token: a client that hangs up stops waiting, but the work carries on for everyone
+/// else. Host shutdown still cancels it, and <see cref="GitBranchStateCacheOptions.FetchTimeout"/>
+/// still bounds it, because <see cref="IGitRunner"/> enforces the invocation's timeout itself.
+/// </para>
+/// <para>
 /// A clone lands in a temporary directory and is moved into place only once it has finished. A crash
 /// part way through a clone of a large repository would otherwise leave a directory that looks like a
 /// mirror, and every later request would be answered from a repository missing most of its history.
@@ -32,6 +40,7 @@ using Microsoft.Extensions.Options;
 /// <param name="metrics">Service counters.</param>
 /// <param name="options">The configured options.</param>
 /// <param name="timeProvider">Clock, injected so freshness is testable.</param>
+/// <param name="lifetime">The host's lifetime, whose shutdown cancels a clone or fetch in progress.</param>
 /// <param name="logger">Logger.</param>
 public sealed class MirrorFetcher(
 	IGitRunner runner,
@@ -41,6 +50,7 @@ public sealed class MirrorFetcher(
 	BranchStateMetrics metrics,
 	IOptions<GitBranchStateCacheOptions> options,
 	TimeProvider timeProvider,
+	IHostApplicationLifetime lifetime,
 	ILogger<MirrorFetcher> logger) : IMirrorFetcher
 {
 	/// <inheritdoc />
@@ -65,25 +75,51 @@ public sealed class MirrorFetcher(
 			return MirrorFetchResult.Current(current);
 		}
 
-		using IWorkTicket ticket = flights.Acquire(key.ToFlightKey());
+		IWorkTicket ticket = flights.Acquire(key.ToFlightKey());
 
 		if (!ticket.IsLeader)
 		{
 			return await FollowAsync(key, directory, ticket, cancellationToken).ConfigureAwait(false);
 		}
 
-		MirrorFetchResult result = exists
-			? await FetchAsync(key, directory, upstreamBase, authorization, fetchedAt, cancellationToken)
-				.ConfigureAwait(false)
-			: await CloneAsync(key, directory, repositoryUrl, upstreamBase, authorization, cancellationToken)
-				.ConfigureAwait(false);
+		// The work owns the leader's ticket from here on, so a leader whose client disconnects stops waiting
+		// without abandoning the clone or fetch every follower is waiting on.
+		Task<MirrorFetchResult> work = LeadAsync(
+			key, directory, repositoryUrl, upstreamBase, authorization, exists, fetchedAt, ticket);
 
-		ticket.Complete(result.Status == MirrorFetchStatus.Current);
-		return result;
+		return await work.WaitAsync(cancellationToken).ConfigureAwait(false);
 	}
 
 	/// <summary>
-	/// Waits for whichever request is already working on this repository.
+	/// Does the clone or fetch on behalf of every request coalesced onto it, and reports the outcome.
+	/// </summary>
+	private async Task<MirrorFetchResult> LeadAsync(
+		MirrorKey key,
+		string directory,
+		Uri repositoryUrl,
+		Uri upstreamBase,
+		string? authorization,
+		bool exists,
+		DateTimeOffset? fetchedAt,
+		IWorkTicket ticket)
+	{
+		using (ticket)
+		{
+			CancellationToken stopping = lifetime.ApplicationStopping;
+
+			MirrorFetchResult result = exists
+				? await FetchAsync(key, directory, upstreamBase, authorization, fetchedAt, stopping)
+					.ConfigureAwait(false)
+				: await CloneAsync(key, directory, repositoryUrl, upstreamBase, authorization, stopping)
+					.ConfigureAwait(false);
+
+			ticket.Complete(result.Status == MirrorFetchStatus.Current);
+			return result;
+		}
+	}
+
+	/// <summary>
+	/// Waits for whichever request is already working on this repository, and releases its ticket.
 	/// </summary>
 	/// <remarks>
 	/// A follower whose leader succeeded re-reads the marker rather than trusting the leader's answer,
@@ -99,9 +135,13 @@ public sealed class MirrorFetcher(
 	{
 		metrics.RecordFetchWait(key.Upstream);
 
-		bool succeeded = await ticket
-			.WaitForLeaderAsync(options.Value.FetchTimeout, cancellationToken)
-			.ConfigureAwait(false);
+		bool succeeded;
+		using (ticket)
+		{
+			succeeded = await ticket
+				.WaitForLeaderAsync(options.Value.FetchTimeout, cancellationToken)
+				.ConfigureAwait(false);
+		}
 
 		if (succeeded && mirrors.RefsFetchedAt(directory) is DateTimeOffset refreshed)
 		{
