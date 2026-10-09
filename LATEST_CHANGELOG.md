@@ -1,6 +1,6 @@
-## v1.0.38 (patch)
+## v1.0.39 (patch)
 
-Changes since v1.0.37:
+Changes since v1.0.38:
 
-- Stop the admission probe decoding output it never reads, and guard the large non-UTF-8 diff [patch] ([@Claude](https://github.com/Claude))
+- Resolve a relative --mirror-root instead of aborting startup [patch] ([@Claude](https://github.com/Claude))
 
