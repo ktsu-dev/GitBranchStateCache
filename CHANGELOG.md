@@ -1,3 +1,58 @@
+## v1.0.39 (patch)
+
+Changes since v1.0.38:
+
+- Resolve a relative --mirror-root instead of aborting startup [patch] ([@Claude](https://github.com/Claude))
+
+## v1.0.38 (patch)
+
+Changes since v1.0.37:
+
+- Stop the admission probe decoding output it never reads, and guard the large non-UTF-8 diff [patch] ([@Claude](https://github.com/Claude))
+
+## v1.0.38-pre.1 (prerelease)
+
+Changes since v1.0.37:
+
+- Bump the ktsu group with 4 updates ([@dependabot[bot]](https://github.com/dependabot[bot]))
+
+## v1.0.37 (patch)
+
+Changes since v1.0.36:
+
+- Keep a coalesced clone or fetch running when the request that started it disconnects [patch] ([@Claude](https://github.com/Claude))
+
+## v1.0.37-pre.2 (prerelease)
+
+Changes since v1.0.37-pre.1:
+
+- Bump MSTest.Sdk from 4.4.1 to 4.5.1 ([@dependabot[bot]](https://github.com/dependabot[bot]))
+- Bump the ktsu group with 4 updates ([@dependabot[bot]](https://github.com/dependabot[bot]))
+
+## v1.0.37-pre.1 (prerelease)
+
+Changes since v1.0.36:
+
+- Bump the ktsu group with 3 updates ([@dependabot[bot]](https://github.com/dependabot[bot]))
+
+## v1.0.36 (patch)
+
+Changes since v1.0.35:
+
+- Match 401/403 only in git's own phrasing when classifying a refused probe [patch] ([@Claude](https://github.com/Claude))
+
+## v1.0.36-pre.3 (prerelease)
+
+Changes since v1.0.36-pre.2:
+
+- Bump Polyfill from 11.4.1 to 11.4.3 ([@dependabot[bot]](https://github.com/dependabot[bot]))
+
+## v1.0.36-pre.2 (prerelease)
+
+Changes since v1.0.36-pre.1:
+
+- Bump the ktsu group with 2 updates ([@dependabot[bot]](https://github.com/dependabot[bot]))
+
 ## v1.0.36-pre.1 (prerelease)
 
 Changes since v1.0.35:

@@ -49,6 +49,19 @@ public class AdmissionGateTests
 	}
 
 	[TestMethod]
+	public async Task AdmitAsync_DiscardsTheProbesOutput()
+	{
+		// The probe proves a credential by succeeding, and its output is never read. Decoding it would
+		// let one branch name that is not valid UTF-8 refuse every caller of the repository
+		// (ktsu-dev/GitBranchStateCache#50).
+		(AdmissionGate gate, FakeGitRunner runner, _) = Build();
+
+		await AdmitAsync(gate);
+
+		Assert.IsTrue(runner.Invocations.Single().DiscardStandardOutput);
+	}
+
+	[TestMethod]
 	public async Task AdmitAsync_PassesTheCredentialThroughTheEnvironmentAndNeverAnArgument()
 	{
 		// A command line is world readable on Linux and this process handles many people's forge
@@ -100,6 +113,45 @@ public class AdmissionGateTests
 
 		Assert.IsFalse(outcome.Admitted);
 		Assert.AreEqual(502, outcome.StatusCode);
+	}
+
+	[TestMethod]
+	[DataRow("fatal: unable to access 'https://nonexistent-host.invalid/studio/game-401.git/': CONNECT tunnel failed, response 502")]
+	[DataRow("fatal: unable to access 'https://github.com/studio/game-403.git/': Could not resolve host: github.com")]
+	[DataRow("fatal: unable to access 'https://forge.example:4401/studio/game.git/': Failed to connect to forge.example port 4401")]
+	public async Task AdmitAsync_WhenTheForgeIsUnreachableAtAUrlContainingAStatusCode_Is502(string error)
+	{
+		// Git echoes the repository URL, so digits in it must not be read as the status the forge sent.
+		(AdmissionGate gate, FakeGitRunner runner, _) = Build();
+		runner.Respond = _ => new GitResult(128, string.Empty, error, TimedOut: false);
+
+		Assert.AreEqual(502, (await AdmitAsync(gate)).StatusCode);
+	}
+
+	[TestMethod]
+	[DataRow("fatal: unable to access 'https://github.com/studio/game.git/': The requested URL returned error: 401")]
+	[DataRow("remote: Permission to studio/game.git denied to someone.\nfatal: unable to access 'https://github.com/studio/game.git/': The requested URL returned error: 403")]
+	[DataRow("error: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403")]
+	public async Task AdmitAsync_WhenGitReportsA401Or403_Is401(string error)
+	{
+		(AdmissionGate gate, FakeGitRunner runner, _) = Build();
+		runner.Respond = _ => new GitResult(128, string.Empty, error, TimedOut: false);
+
+		Assert.AreEqual(401, (await AdmitAsync(gate)).StatusCode);
+	}
+
+	[TestMethod]
+	public async Task AdmitAsync_WhenAzureDevOpsReportsTF401019_Is404()
+	{
+		// TF401019 is Azure DevOps's "repository does not exist", whatever its code looks like.
+		(AdmissionGate gate, FakeGitRunner runner, _) = Build();
+		runner.Respond = _ => new GitResult(
+			128,
+			string.Empty,
+			"remote: TF401019: The Git repository with name or identifier game does not exist or you do not have permissions for the operation you are attempting.",
+			TimedOut: false);
+
+		Assert.AreEqual(404, (await AdmitAsync(gate)).StatusCode);
 	}
 
 	[TestMethod]

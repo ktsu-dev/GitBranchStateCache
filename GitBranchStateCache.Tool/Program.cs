@@ -26,7 +26,7 @@ internal static class Program
 	/// <summary>The configuration key the <c>--mirror-root</c> flag overrides.</summary>
 	private const string MirrorRootKey = "GitBranchStateCache:MirrorRoot";
 
-	private static async Task<int> Main(string[] args)
+	internal static async Task<int> Main(string[] args)
 	{
 		Option<int?> port = new("--port", "-p")
 		{
@@ -94,7 +94,7 @@ internal static class Program
 
 			if (parseResult.GetValue(mirrorRoot) is string root_)
 			{
-				overrides[MirrorRootKey] = root_;
+				overrides[MirrorRootKey] = ResolveMirrorRoot(root_);
 			}
 
 			if (parseResult.GetValue(gitExecutable) is string git)
@@ -265,6 +265,20 @@ internal static class Program
 
 		return true;
 	}
+
+	/// <summary>
+	/// Resolves the <c>--mirror-root</c> flag against the working directory.
+	/// </summary>
+	/// <remarks>
+	/// The options validator requires a fully qualified root, which keeps configuration files and
+	/// environment variables strict for container deployments. A relative directory is what someone
+	/// running the tool locally types, though, so the flag resolves it the way <c>--config</c> does
+	/// rather than letting startup fail with a validation stack trace. This is the same behaviour as
+	/// <c>--store</c> in <c>ktsu.GitLfsCache</c>.
+	/// </remarks>
+	/// <param name="mirrorRoot">The directory as given on the command line.</param>
+	/// <returns>The fully qualified directory.</returns>
+	internal static string ResolveMirrorRoot(string mirrorRoot) => Path.GetFullPath(mirrorRoot);
 
 	/// <summary>
 	/// Groups every <c>--allow</c> flag by the upstream it names.

@@ -13,6 +13,7 @@ using ktsu.GitBranchStateCache.Git;
 using ktsu.GitBranchStateCache.Mirrors;
 using ktsu.GitBranchStateCache.Observability;
 using ktsu.GitBranchStateCache.Refs;
+using ktsu.GitBranchStateCache.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -100,6 +101,7 @@ public class MirrorFetcherRealGitTests
 			new BranchStateMetrics(meterFactory),
 			options,
 			time,
+			new FakeHostApplicationLifetime(),
 			NullLogger<MirrorFetcher>.Instance);
 
 		Assert.IsTrue(store.TryResolve(new MirrorKey("github", "studio/game.git"), out string? directory));

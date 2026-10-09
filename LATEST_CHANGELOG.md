@@ -1,6 +1,6 @@
-## v1.0.36-pre.1 (prerelease)
+## v1.0.39 (patch)
 
-Changes since v1.0.35:
+Changes since v1.0.38:
 
-- Bump the ktsu group with 3 updates ([@dependabot[bot]](https://github.com/dependabot[bot]))
+- Resolve a relative --mirror-root instead of aborting startup [patch] ([@Claude](https://github.com/Claude))
 
