@@ -1,6 +1,6 @@
-## v1.0.38-pre.1 (prerelease)
+## v1.0.38 (patch)
 
 Changes since v1.0.37:
 
-- Bump the ktsu group with 4 updates ([@dependabot[bot]](https://github.com/dependabot[bot]))
+- Stop the admission probe decoding output it never reads, and guard the large non-UTF-8 diff [patch] ([@Claude](https://github.com/Claude))
 
