@@ -49,6 +49,19 @@ public class AdmissionGateTests
 	}
 
 	[TestMethod]
+	public async Task AdmitAsync_DiscardsTheProbesOutput()
+	{
+		// The probe proves a credential by succeeding, and its output is never read. Decoding it would
+		// let one branch name that is not valid UTF-8 refuse every caller of the repository
+		// (ktsu-dev/GitBranchStateCache#50).
+		(AdmissionGate gate, FakeGitRunner runner, _) = Build();
+
+		await AdmitAsync(gate);
+
+		Assert.IsTrue(runner.Invocations.Single().DiscardStandardOutput);
+	}
+
+	[TestMethod]
 	public async Task AdmitAsync_PassesTheCredentialThroughTheEnvironmentAndNeverAnArgument()
 	{
 		// A command line is world readable on Linux and this process handles many people's forge

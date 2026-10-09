@@ -39,6 +39,17 @@ public sealed class GitInvocation
 	/// </remarks>
 	public string? Authorization { get; init; }
 
+	/// <summary>
+	/// Gets whether standard output is thrown away unread rather than decoded and returned.
+	/// </summary>
+	/// <remarks>
+	/// For a command whose answer is its exit code alone. Its output is still drained, so the command
+	/// never blocks on a full pipe, but it is not held to strict UTF-8: a branch name git allows and
+	/// UTF-8 cannot read would otherwise fail a command whose output nobody looks at
+	/// (ktsu-dev/GitBranchStateCache#50).
+	/// </remarks>
+	public bool DiscardStandardOutput { get; init; }
+
 	/// <summary>Gets how long the command may run before it is killed.</summary>
 	public required TimeSpan Timeout { get; init; }
 }

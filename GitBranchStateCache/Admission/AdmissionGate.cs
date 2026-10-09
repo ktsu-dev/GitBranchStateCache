@@ -109,6 +109,10 @@ public sealed class AdmissionGate(
 				CredentialScope = upstreamBase,
 				Authorization = authorization,
 				Timeout = options.Value.ProbeTimeout,
+
+				// Only whether the probe succeeded matters, so a branch name that is not valid UTF-8
+				// cannot refuse a whole repository (ktsu-dev/GitBranchStateCache#50).
+				DiscardStandardOutput = true,
 			},
 			cancellationToken).ConfigureAwait(false);
 

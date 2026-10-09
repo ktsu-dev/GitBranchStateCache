@@ -237,6 +237,66 @@ public class GitRunnerTests
 		Assert.Contains("not valid UTF-8", result.StandardError);
 	}
 
+	[TestMethod]
+	[OSCondition(OperatingSystems.Linux | OperatingSystems.OSX)]
+	public async Task RunAsync_OutputThatIsNotUtf8AndLargerThanThePipe_IsReportedPromptlyRatherThanAsATimeout()
+	{
+		// A diff-tree with one non-UTF-8 path among enough others to fill the pipe. Once the decoder
+		// refuses the bad byte, the rest still has to be drained or the process ended, or git blocks on
+		// the full pipe and the run is reported as a timeout instead (ktsu-dev/GitBranchStateCache#50).
+		Stopwatch elapsed = Stopwatch.StartNew();
+
+		GitResult result = await Build("/bin/sh").RunAsync(
+			new GitInvocation
+			{
+				Arguments = ["-c", "printf 'b\\377.uasset\\0'; head -c 204800 /dev/zero | tr '\\0' a"],
+				Timeout = TimeSpan.FromSeconds(20),
+			},
+			CancellationToken.None);
+
+		Assert.IsFalse(result.TimedOut, "The run stalled on a full pipe until it was killed.");
+		Assert.Contains("not valid UTF-8", result.StandardError);
+		Assert.IsLessThan(TimeSpan.FromSeconds(10), elapsed.Elapsed);
+	}
+
+	[TestMethod]
+	[OSCondition(OperatingSystems.Linux | OperatingSystems.OSX)]
+	public async Task RunAsync_DiscardingStandardOutput_SucceedsWhateverTheOutputHolds()
+	{
+		// The admission probe asks only whether ls-remote succeeded. A branch name git allows but
+		// UTF-8 cannot read must not turn a reachable repository into a refused one.
+		GitResult result = await Build("/bin/sh").RunAsync(
+			new GitInvocation
+			{
+				Arguments = ["-c", "printf 'deadbeef\\trefs/heads/caf\\351\\n'; head -c 204800 /dev/zero | tr '\\0' a"],
+				Timeout = TimeSpan.FromSeconds(20),
+				DiscardStandardOutput = true,
+			},
+			CancellationToken.None);
+
+		Assert.IsTrue(result.Succeeded, result.StandardError);
+		Assert.AreEqual(string.Empty, result.StandardOutput);
+	}
+
+	[TestMethod]
+	[OSCondition(OperatingSystems.Linux | OperatingSystems.OSX)]
+	public async Task RunAsync_DiscardingStandardOutput_StillReportsStandardError()
+	{
+		// What a refused probe says on standard error is what classifies it, so only standard output
+		// is thrown away.
+		GitResult result = await Build("/bin/sh").RunAsync(
+			new GitInvocation
+			{
+				Arguments = ["-c", "printf 'fatal: Authentication failed\\n' >&2; exit 128"],
+				Timeout = TimeSpan.FromSeconds(20),
+				DiscardStandardOutput = true,
+			},
+			CancellationToken.None);
+
+		Assert.IsFalse(result.Succeeded);
+		Assert.Contains("Authentication failed", result.StandardError);
+	}
+
 	private static string ReaderExecutable() => OnWindows ? "cmd.exe" : "/bin/sh";
 
 	private static string[] ReaderArguments() => OnWindows
