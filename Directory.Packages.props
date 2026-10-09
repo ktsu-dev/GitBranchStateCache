@@ -7,8 +7,8 @@
     <PackageVersion Include="ktsu.Essentials" Version="2.10.7" />
     <PackageVersion Include="ktsu.RunCommand" Version="1.9.5" />
     <PackageVersion Include="ktsu.Essentials.FileSystemProviders.Native" Version="2.10.7" />
-    <PackageVersion Include="ktsu.Semantics.Paths" Version="5.11.3" />
-    <PackageVersion Include="ktsu.Semantics.Strings" Version="5.11.3" />
+    <PackageVersion Include="ktsu.Semantics.Paths" Version="5.11.5" />
+    <PackageVersion Include="ktsu.Semantics.Strings" Version="5.11.5" />
     <PackageVersion Include="Testably.Abstractions.FileSystem.Interface" Version="10.4.0" />
     <PackageVersion Include="System.CommandLine" Version="2.0.12" />
   </ItemGroup>
