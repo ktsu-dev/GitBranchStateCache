@@ -109,6 +109,22 @@ public class StateFlowTests
 	}
 
 	[TestMethod]
+	public async Task Post_State_AnEmptyPathsList_NamesNoPathsButStillReportsTheBranches()
+	{
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync();
+		Seed(fixture.Git);
+
+		using HttpResponseMessage response = await fixture.Client.SendAsync(
+			StateRequest(Body(paths: string.Empty)));
+
+		JsonElement body = await ReadAsync(response);
+
+		Assert.AreEqual(0, body.GetProperty("paths").EnumerateObject().Count());
+		Assert.HasCount(1, body.GetProperty("branches").EnumerateArray().ToList());
+		Assert.IsFalse(body.GetProperty("truncated").GetBoolean());
+	}
+
+	[TestMethod]
 	public async Task Post_State_WildcardPattern_AnswersForEveryMatchingBranch()
 	{
 		await using ServiceFixture fixture = await ServiceFixture.StartAsync();
