@@ -39,6 +39,15 @@ public class RepositoryIdentityTests
 	/// </summary>
 	private const string UpstreamCallerSpelling = "/v1/GitHub/studio/game.git/state";
 
+	/// <summary>The same repository as a client whose remote has no trailing <c>.git</c> spells it.</summary>
+	private const string SuffixlessSpelling = "/v1/github/studio/game/state";
+
+	/// <summary>An allow-list wide enough to admit the repository with and without its <c>.git</c>.</summary>
+	private static readonly Dictionary<string, string?> WildcardAllowList = new(StringComparer.Ordinal)
+	{
+		["GitBranchStateCache:Upstreams:github:Repositories:0"] = "studio/*",
+	};
+
 	private const string Body = $$"""{"base":"{{ClientBase}}","branchPatterns":["origin/main"]}""";
 
 	private static void Seed(ScriptedGit git)
@@ -117,8 +126,8 @@ public class RepositoryIdentityTests
 	[TestMethod]
 	public async Task ARequestSpelledDifferentlyFromTheAllowList_MirrorsUnderTheCanonicalPath()
 	{
-		// The canonical form is lower case, so an operator reading the volume sees one directory per
-		// repository whatever casing the clients that asked for it happened to use.
+		// The canonical form is lower case without a trailing .git, so an operator reading the volume sees
+		// one directory per repository whatever spelling the clients that asked for it happened to use.
 		await using ServiceFixture fixture = await ServiceFixture.StartAsync();
 		Seed(fixture.Git);
 
@@ -130,7 +139,7 @@ public class RepositoryIdentityTests
 			ServiceFixture.MirrorRoot,
 			"github",
 			"studio",
-			"game.git",
+			"game",
 			"mirror.git")));
 	}
 
@@ -203,7 +212,57 @@ public class RepositoryIdentityTests
 			ServiceFixture.MirrorRoot,
 			"github",
 			"studio",
-			"game.git",
+			"game",
 			"mirror.git")));
+	}
+
+	[TestMethod]
+	public async Task WithAndWithoutGitSuffix_ShareOneMirrorFetchDiffAndAdmission()
+	{
+		// Remotes are cloned both ways, and a wildcard allow-list admits both, so a trailing .git is the
+		// same duplication as casing: one repository, so one clone, one credential probe, and one diff.
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync(WildcardAllowList);
+		Seed(fixture.Git);
+
+		using HttpResponseMessage suffixed = await fixture.Client.SendAsync(Request(ConfiguredSpelling));
+		using HttpResponseMessage suffixless = await fixture.Client.SendAsync(Request(SuffixlessSpelling));
+
+		Assert.AreEqual(HttpStatusCode.OK, suffixed.StatusCode);
+		Assert.AreEqual(HttpStatusCode.OK, suffixless.StatusCode);
+
+		Assert.AreEqual(1, fixture.Git.CountOf("clone"));
+		Assert.AreEqual(1, fixture.Git.CountOf("ls-remote"));
+		Assert.AreEqual(1, fixture.Git.CountOf("diff-tree"));
+	}
+
+	[TestMethod]
+	public async Task WithAndWithoutGitSuffix_ProduceOneMirrorDirectory()
+	{
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync(WildcardAllowList);
+		Seed(fixture.Git);
+
+		using HttpResponseMessage suffixed = await fixture.Client.SendAsync(Request(ConfiguredSpelling));
+		using HttpResponseMessage suffixless = await fixture.Client.SendAsync(Request(SuffixlessSpelling));
+
+		Assert.HasCount(
+			1,
+			fixture.FileSystem.Directory.GetDirectories(ServiceFixture.MirrorRoot, "mirror.git", SearchOption.AllDirectories));
+	}
+
+	[TestMethod]
+	public async Task ARequestWithAGitSuffix_StillReachesTheForgeAsSpelled()
+	{
+		// Only the bookkeeping drops the suffix: the forge is the authority on its own repository names,
+		// so the clone URL keeps the caller's spelling.
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync();
+		Seed(fixture.Git);
+
+		using HttpResponseMessage response = await fixture.Client.SendAsync(Request(ConfiguredSpelling));
+
+		Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+		Assert.IsTrue(fixture.Git.Invocations
+			.Where(invocation => invocation.Arguments.Contains("clone"))
+			.SelectMany(invocation => invocation.Arguments)
+			.Any(argument => argument.EndsWith("/studio/game.git", StringComparison.Ordinal)));
 	}
 }
