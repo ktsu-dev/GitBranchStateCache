@@ -1,6 +1,8 @@
-## v1.0.42 (patch)
+## v1.0.42-pre.1 (prerelease)
 
-No significant changes detected since v1.0.41.
+Changes since v1.0.41:
+
+- Bump the microsoft group with 1 update (dependabot[bot])
 
 ## v1.0.41 (patch)
 
