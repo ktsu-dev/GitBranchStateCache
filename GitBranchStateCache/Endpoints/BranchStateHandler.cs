@@ -407,7 +407,7 @@ internal sealed class BranchStateHandler(
 			return null;
 		}
 
-		MirrorKey key = new(Canonicalize(route.Upstream), Canonicalize(route.RepositoryPath));
+		MirrorKey key = new(Canonicalize(route.Upstream), WithoutGitSuffix(Canonicalize(route.RepositoryPath)));
 
 		if (!mirrors.TryResolve(key, out string? directory)
 			|| !UpstreamUrl.TryCombine(upstreamBase!, route.RepositoryPath, out Uri? repositoryUrl))
@@ -450,6 +450,32 @@ internal sealed class BranchStateHandler(
 	/// <param name="segment">The upstream key or repository path as the caller spelled it.</param>
 	/// <returns>The spelling this service records the request under.</returns>
 	private static string Canonicalize(string segment) => segment.ToLowerInvariant();
+
+	/// <summary>
+	/// Drops a single trailing <c>.git</c> from a canonicalised repository path, so that
+	/// <c>studio/game</c> and <c>studio/game.git</c> are recorded as the one repository they are.
+	/// </summary>
+	/// <remarks>
+	/// Remotes are routinely cloned both ways, and a wildcard allow-list admits both, so this is the same
+	/// duplication <see cref="Canonicalize"/> removes for casing, reached through a suffix instead: two
+	/// mirrors, two fetches, two diff cache entries and two admission probes for one repository. Like
+	/// casing, it is removed from this service's bookkeeping only; the URL sent to the forge keeps the
+	/// caller's spelling. A path whose last segment is nothing but <c>.git</c> is left alone, because
+	/// stripping it would leave an empty segment that names a different repository or none at all.
+	/// </remarks>
+	/// <param name="repositoryPath">The repository path, already canonicalised.</param>
+	/// <returns>The path without its trailing <c>.git</c>, or the path unchanged if it has none.</returns>
+	private static string WithoutGitSuffix(string repositoryPath)
+	{
+		const string Suffix = ".git";
+		int stem = repositoryPath.Length - Suffix.Length;
+
+		return stem > 0
+			&& repositoryPath[stem - 1] != '/'
+			&& repositoryPath.EndsWith(Suffix, StringComparison.Ordinal)
+				? repositoryPath[..stem]
+				: repositoryPath;
+	}
 
 	private static bool TryParsePatterns(
 		IReadOnlyList<string>? requested,
