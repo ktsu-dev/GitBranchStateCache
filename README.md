@@ -91,7 +91,7 @@ Authorization: Basic ...
 
 `base` is the client's latest **pushed** ancestor, not its true HEAD, which `git rev-parse @{upstream}` produces locally without touching the network. The mirror cannot compute a merge base against a commit it has never seen, and an unpushed commit can only make the client more current than the base it declares.
 
-`paths` is optional; omitting it returns every changed path, which is what a client warming its whole state wants and also how a response becomes enormous.
+`paths` is optional; omitting it returns every changed path, which is what a client warming its whole state wants and also how a response becomes enormous. An empty `paths` list asks about no paths: the response still reports each branch, but `paths` comes back empty.
 
 ```json
 {

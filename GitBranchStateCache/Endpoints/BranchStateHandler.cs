@@ -148,7 +148,7 @@ internal sealed class BranchStateHandler(
 
 		int limit = options.Value.MaxPathsPerRequest;
 
-		if (request.Paths is { Count: > 0 } && request.Paths.Count > limit)
+		if (request.Paths is not null && request.Paths.Count > limit)
 		{
 			return BadRequest($"'paths' named {request.Paths.Count} paths, and at most {limit} may be sent.");
 		}
@@ -220,7 +220,7 @@ internal sealed class BranchStateHandler(
 		MirrorFetchResult mirror,
 		CancellationToken cancellationToken)
 	{
-		HashSet<string>? wanted = request.Paths is { Count: > 0 }
+		HashSet<string>? wanted = request.Paths is not null
 			? new HashSet<string>(request.Paths, StringComparer.Ordinal)
 			: null;
 
