@@ -1,7 +1,7 @@
-## v1.0.40 (patch)
+## v1.0.41 (patch)
 
-Changes since v1.0.39:
+Changes since v1.0.40:
 
-- Raise ktsu.Essentials to 2.10.7 and Testably interface to 10.4.0 ([@Claude](https://github.com/Claude))
-- Merge main into dependabot/nuget/Testably.Abstractions.Testing-7.1.1 ([@Claude](https://github.com/Claude))
+- Name no paths when a state request sends an empty paths list [patch] ([@Claude](https://github.com/Claude))
+- Key a repository requested with and without a trailing .git as one mirror [patch] ([@matt-edmondson](https://github.com/matt-edmondson))
 
