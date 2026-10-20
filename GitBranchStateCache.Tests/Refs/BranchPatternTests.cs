@@ -170,6 +170,78 @@ public class BranchPatternTests
 	}
 
 	[TestMethod]
+	public void Matches_DigitClass_MatchesDigits()
+	{
+		// git branch --list 'release-[[:digit:]]*' lists release-1.0. Read as a plain set, the first ]
+		// would close the bracket and leave { '[', ':', 'd', 'i', 'g', 't' }.
+		BranchPattern pattern = Parse("origin/release-[[:digit:]]*");
+
+		Assert.IsTrue(pattern.Matches("origin/release-1.0"));
+		Assert.IsFalse(pattern.Matches("origin/release-d]x"));
+		Assert.IsFalse(pattern.Matches("origin/release-x"));
+	}
+
+	[TestMethod]
+	public void Matches_AlnumClass_MatchesLettersAndDigits()
+	{
+		BranchPattern pattern = Parse("origin/[[:alnum:]]");
+
+		Assert.IsTrue(pattern.Matches("origin/a"));
+		Assert.IsTrue(pattern.Matches("origin/7"));
+		Assert.IsFalse(pattern.Matches("origin/-"));
+	}
+
+	[TestMethod]
+	public void Matches_ClassMixedWithMembers_MatchesEither()
+	{
+		BranchPattern alpha = Parse("origin/[[:alpha:]_-]");
+
+		Assert.IsTrue(alpha.Matches("origin/Q"));
+		Assert.IsTrue(alpha.Matches("origin/_"));
+		Assert.IsTrue(alpha.Matches("origin/-"));
+		Assert.IsFalse(alpha.Matches("origin/1"));
+
+		BranchPattern mixed = Parse("origin/v[a[:digit:]]");
+
+		Assert.IsTrue(mixed.Matches("origin/va"));
+		Assert.IsTrue(mixed.Matches("origin/v3"));
+		Assert.IsFalse(mixed.Matches("origin/vb"));
+	}
+
+	[TestMethod]
+	public void Matches_NegatedClass_MatchesEverythingElse()
+	{
+		BranchPattern pattern = Parse("origin/[![:upper:]]");
+
+		Assert.IsTrue(pattern.Matches("origin/a"));
+		Assert.IsFalse(pattern.Matches("origin/A"));
+	}
+
+	[TestMethod]
+	public void Matches_ColonBracketWithoutClosingColon_IsAnOrdinarySet()
+	{
+		// After [: the first ] ends a class only when a : precedes it, as in git's wildmatch.
+		BranchPattern pattern = Parse("origin/[[:x]");
+
+		Assert.IsTrue(pattern.Matches("origin/["));
+		Assert.IsTrue(pattern.Matches("origin/:"));
+		Assert.IsTrue(pattern.Matches("origin/x"));
+	}
+
+	[TestMethod]
+	public void TryParse_UnknownClass_IsRefused()
+	{
+		Assert.IsFalse(BranchPattern.TryParse("origin/[[:bogus:]]", out BranchPattern? parsed, out string? failure));
+		Assert.IsNull(parsed);
+		Assert.IsNotNull(failure);
+		StringAssert.Contains(failure, "bogus");
+	}
+
+	[TestMethod]
+	public void TryParse_EscapedBracketThatLooksLikeAnUnknownClass_IsAccepted() =>
+		Assert.IsTrue(BranchPattern.TryParse(@"origin/\[[:bogus:]", out _, out _));
+
+	[TestMethod]
 	public void TryParse_Empty_IsRefused() =>
 		Assert.IsFalse(BranchPattern.TryParse(string.Empty, out _, out _));
 

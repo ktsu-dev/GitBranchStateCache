@@ -25,6 +25,14 @@ namespace ktsu.GitBranchStateCache.Refs;
 /// <c>[</c> with no closing <c>]</c> is an ordinary character.
 /// </para>
 /// <para>
+/// A bracket expression may also hold the POSIX character classes git knows, alone or mixed with
+/// other members as in <c>[a[:digit:]]</c>: <c>[:alnum:]</c>, <c>[:alpha:]</c>, <c>[:blank:]</c>,
+/// <c>[:cntrl:]</c>, <c>[:digit:]</c>, <c>[:graph:]</c>, <c>[:lower:]</c>, <c>[:print:]</c>,
+/// <c>[:punct:]</c>, <c>[:space:]</c>, <c>[:upper:]</c> and <c>[:xdigit:]</c>. Each tests the ASCII
+/// range it names. A class name git does not know, such as <c>[:bogus:]</c>, makes git abandon the
+/// match, so such a pattern is refused rather than left to match nothing.
+/// </para>
+/// <para>
 /// Matching is case sensitive, because git ref names are.
 /// </para>
 /// </remarks>
@@ -68,8 +76,48 @@ public sealed class BranchPattern
 			return false;
 		}
 
+		if (TryFindUnknownClass(pattern.AsSpan(), out string? unknownClass))
+		{
+			failure = $"a branch pattern must not use the unknown character class [:{unknownClass}:]";
+			return false;
+		}
+
 		parsed = new BranchPattern(pattern);
 		return true;
+	}
+
+	/// <summary>
+	/// Looks through every bracket expression in a pattern for a character class git does not know.
+	/// </summary>
+	/// <param name="pattern">The whole pattern.</param>
+	/// <param name="unknownClass">The first unknown class name, when there is one.</param>
+	/// <returns><see langword="true"/> when the pattern names an unknown class.</returns>
+	private static bool TryFindUnknownClass(ReadOnlySpan<char> pattern, out string? unknownClass)
+	{
+		int index = 0;
+		while (index < pattern.Length)
+		{
+			if (pattern[index] == '\\')
+			{
+				index += 2;
+			}
+			else if (pattern[index] == '[' && TryWalkBracket(pattern, index, '\0', out int length, out _, out unknownClass))
+			{
+				if (unknownClass is not null)
+				{
+					return true;
+				}
+
+				index += length;
+			}
+			else
+			{
+				index++;
+			}
+		}
+
+		unknownClass = null;
+		return false;
 	}
 
 	/// <summary>Reports whether a branch name matches.</summary>
@@ -176,8 +224,26 @@ public sealed class BranchPattern
 	/// <see langword="false"/> when the bracket is never closed, in which case the <c>[</c> is an
 	/// ordinary character.
 	/// </returns>
-	private static bool TryMatchBracket(ReadOnlySpan<char> pattern, int start, char character, out int length, out bool matched)
+	private static bool TryMatchBracket(ReadOnlySpan<char> pattern, int start, char character, out int length, out bool matched) =>
+		TryWalkBracket(pattern, start, character, out length, out matched, out _);
+
+	/// <summary>
+	/// Walks a bracket expression, matching it against one character and noting any unknown
+	/// character class it names.
+	/// </summary>
+	/// <param name="pattern">The whole pattern.</param>
+	/// <param name="start">Where the opening <c>[</c> is.</param>
+	/// <param name="character">The character from the name.</param>
+	/// <param name="length">How many pattern characters the expression spans, including both brackets.</param>
+	/// <param name="matched">Whether the expression matches the character.</param>
+	/// <param name="unknownClass">The first class name git does not know, when the expression has one.</param>
+	/// <returns>
+	/// <see langword="false"/> when the bracket is never closed, in which case the <c>[</c> is an
+	/// ordinary character.
+	/// </returns>
+	private static bool TryWalkBracket(ReadOnlySpan<char> pattern, int start, char character, out int length, out bool matched, out string? unknownClass)
 	{
+		unknownClass = null;
 		int index = start + 1;
 		bool negated = index < pattern.Length && (pattern[index] == '!' || pattern[index] == '^');
 		if (negated)
@@ -192,6 +258,21 @@ public sealed class BranchPattern
 		while (index < pattern.Length && (first || pattern[index] != ']'))
 		{
 			first = false;
+
+			if (TryReadClass(pattern, ref index, out string? className))
+			{
+				if (IsInClass(className, character, out bool known))
+				{
+					found = true;
+				}
+
+				if (!known)
+				{
+					unknownClass ??= className;
+				}
+
+				continue;
+			}
 
 			if (!TryReadRange(pattern, ref index, out char low, out char high))
 			{
@@ -211,6 +292,86 @@ public sealed class BranchPattern
 		length = index + 1 - start;
 		matched = found != negated;
 		return true;
+	}
+
+	/// <summary>
+	/// Reads a character class such as <c>[:digit:]</c> inside a bracket expression.
+	/// </summary>
+	/// <param name="pattern">The whole pattern.</param>
+	/// <param name="index">Where the member starts; moved past the class when there is one.</param>
+	/// <param name="className">The name between the colons, when there is a class.</param>
+	/// <returns><see langword="true"/> when the member is a class.</returns>
+	/// <remarks>
+	/// Follows git's wildmatch: after <c>[:</c>, the first <c>]</c> ends the class only when a
+	/// <c>:</c> comes straight before it. Otherwise the <c>[</c> is an ordinary member and the walk
+	/// carries on from the character after it.
+	/// </remarks>
+	private static bool TryReadClass(ReadOnlySpan<char> pattern, ref int index, out string? className)
+	{
+		className = null;
+		if (index + 1 >= pattern.Length || pattern[index] != '[' || pattern[index + 1] != ':')
+		{
+			return false;
+		}
+
+		int nameStart = index + 2;
+		int close = pattern[nameStart..].IndexOf(']');
+		if (close < 0)
+		{
+			return false;
+		}
+
+		close += nameStart;
+		if (close - 1 < nameStart || pattern[close - 1] != ':')
+		{
+			return false;
+		}
+
+		className = pattern[nameStart..(close - 1)].ToString();
+		index = close + 1;
+		return true;
+	}
+
+	/// <summary>
+	/// Tests a character against a POSIX character class, the ASCII way git does.
+	/// </summary>
+	/// <param name="className">The class name, such as <c>digit</c>.</param>
+	/// <param name="character">The character from the name.</param>
+	/// <param name="known">Whether git knows the class name.</param>
+	/// <returns><see langword="true"/> when the class is known and holds the character.</returns>
+	private static bool IsInClass(string? className, char character, out bool known)
+	{
+		known = true;
+		switch (className)
+		{
+			case "alnum":
+				return char.IsAsciiLetterOrDigit(character);
+			case "alpha":
+				return char.IsAsciiLetter(character);
+			case "blank":
+				return character is ' ' or '\t';
+			case "cntrl":
+				return character is < ' ' or '\x7f';
+			case "digit":
+				return char.IsAsciiDigit(character);
+			case "graph":
+				return character is > ' ' and < '\x7f';
+			case "lower":
+				return char.IsAsciiLetterLower(character);
+			case "print":
+				return character is >= ' ' and < '\x7f';
+			case "punct":
+				return character is > ' ' and < '\x7f' && !char.IsAsciiLetterOrDigit(character);
+			case "space":
+				return character is ' ' or (>= '\t' and <= '\r');
+			case "upper":
+				return char.IsAsciiLetterUpper(character);
+			case "xdigit":
+				return char.IsAsciiHexDigit(character);
+			default:
+				known = false;
+				return false;
+		}
 	}
 
 	/// <summary>
