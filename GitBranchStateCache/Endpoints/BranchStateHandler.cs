@@ -230,11 +230,13 @@ internal sealed class BranchStateHandler(
 		bool partial = false;
 		bool truncated = false;
 
-		foreach (BranchRef branch in branches)
+		BranchWork[] work = await WorkOnAllAsync(repository, request.Base!, branches, cancellationToken)
+			.ConfigureAwait(false);
+
+		for (int index = 0; index < branches.Count; index++)
 		{
-			string? mergeBase = await queries
-				.FindMergeBaseAsync(repository.Directory, request.Base!, branch.Tip, cancellationToken)
-				.ConfigureAwait(false);
+			BranchRef branch = branches[index];
+			string? mergeBase = work[index].MergeBase;
 
 			if (mergeBase is null)
 			{
@@ -244,8 +246,7 @@ internal sealed class BranchStateHandler(
 				continue;
 			}
 
-			DiffOutcome diff = await ComputeAsync(repository, mergeBase, branch, cancellationToken)
-				.ConfigureAwait(false);
+			DiffOutcome diff = work[index].Diff!;
 
 			if (!diff.Succeeded)
 			{
@@ -279,6 +280,58 @@ internal sealed class BranchStateHandler(
 				truncated),
 			BranchStateJsonContext.Default.StateResponse);
 	}
+
+	/// <summary>
+	/// Finds every branch's merge base and diff, several at a time.
+	/// </summary>
+	/// <remarks>
+	/// Each branch's work is independent of every other's, and on a cold cache each step is a git
+	/// process, so they run side by side. The results are indexed like the branches, so the answer is
+	/// assembled in the order the branches matched however the work happened to finish.
+	/// </remarks>
+	private async Task<BranchWork[]> WorkOnAllAsync(
+		ResolvedRepository repository,
+		string clientBase,
+		IReadOnlyList<BranchRef> branches,
+		CancellationToken cancellationToken)
+	{
+		BranchWork[] work = new BranchWork[branches.Count];
+
+		await Parallel.ForEachAsync(
+			Enumerable.Range(0, branches.Count),
+			new ParallelOptions
+			{
+				MaxDegreeOfParallelism = options.Value.MaxConcurrentBranchQueries,
+				CancellationToken = cancellationToken,
+			},
+			async (index, token) => work[index] = await WorkOnAsync(repository, clientBase, branches[index], token)
+				.ConfigureAwait(false)).ConfigureAwait(false);
+
+		return work;
+	}
+
+	/// <summary>
+	/// Finds one branch's merge base with the client's base, and its diff from there.
+	/// </summary>
+	private async Task<BranchWork> WorkOnAsync(
+		ResolvedRepository repository,
+		string clientBase,
+		BranchRef branch,
+		CancellationToken cancellationToken)
+	{
+		string? mergeBase = await queries
+			.FindMergeBaseAsync(repository.Directory, clientBase, branch.Tip, cancellationToken)
+			.ConfigureAwait(false);
+
+		return mergeBase is null
+			? new BranchWork(null, null)
+			: new BranchWork(mergeBase, await ComputeAsync(repository, mergeBase, branch, cancellationToken).ConfigureAwait(false));
+	}
+
+	/// <summary>
+	/// One branch's merge base, and its diff when there is a merge base to diff from.
+	/// </summary>
+	private readonly record struct BranchWork(string? MergeBase, DiffOutcome? Diff);
 
 	/// <summary>
 	/// Computes one branch's diff.

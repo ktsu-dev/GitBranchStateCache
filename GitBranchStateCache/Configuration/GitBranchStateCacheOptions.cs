@@ -49,6 +49,22 @@ public sealed class GitBranchStateCacheOptions
 	public TimeSpan RefsTtl { get; set; } = TimeSpan.FromSeconds(30);
 
 	/// <summary>
+	/// Gets or sets how much longer than <see cref="RefsTtl"/> a request may be answered from the refs
+	/// on disk while a fetch runs in the background.
+	/// </summary>
+	/// <remarks>
+	/// Without this, the first request after <see cref="RefsTtl"/> waits on a round trip to the forge,
+	/// and with editors polling on a heartbeat that is a steady fraction of every request. Answered
+	/// refs are never older than <see cref="RefsTtl"/> plus this, which the validator holds within
+	/// <see cref="AdmissionTtl"/>. Refs older than that are fetched before answering, as before.
+	/// <para>
+	/// Set to <see cref="TimeSpan.Zero"/> to make every request past <see cref="RefsTtl"/> wait on its
+	/// fetch.
+	/// </para>
+	/// </remarks>
+	public TimeSpan RefsServeStaleFor { get; set; } = TimeSpan.FromSeconds(30);
+
+	/// <summary>
 	/// Gets or sets how long an upstream authorization is trusted before it is proven again.
 	/// </summary>
 	/// <remarks>
@@ -82,6 +98,25 @@ public sealed class GitBranchStateCacheOptions
 	/// Gets or sets how many computed diffs are retained before the least recently used is evicted.
 	/// </summary>
 	public int MaxCachedDiffs { get; set; } = 2000;
+
+	/// <summary>
+	/// Gets or sets how many merge bases are retained before the least recently used is evicted.
+	/// </summary>
+	/// <remarks>
+	/// One entry per client base and branch tip, so the working set is roughly the number of editors
+	/// times the number of branches they ask about. Each entry is a few hundred bytes.
+	/// </remarks>
+	public int MaxCachedMergeBases { get; set; } = 20_000;
+
+	/// <summary>
+	/// Gets or sets how many branches one request works on at once when their merge base or diff is
+	/// not cached.
+	/// </summary>
+	/// <remarks>
+	/// Each is a git process, so this bounds how many one request starts at a time. A warm request
+	/// starts none.
+	/// </remarks>
+	public int MaxConcurrentBranchQueries { get; set; } = 4;
 
 	/// <summary>
 	/// Gets or sets the most paths one request may name, and the most one response may return.

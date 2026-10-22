@@ -360,6 +360,176 @@ public class StateFlowTests
 	}
 
 	[TestMethod]
+	public async Task Post_State_WithinTheStaleWindow_AnswersWithoutWaitingForTheFetch()
+	{
+		// The first editor to ask after RefsTtl would otherwise wait on a round trip to the forge, and
+		// with a studio polling on a heartbeat that is a steady share of every request.
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync();
+		Seed(fixture.Git);
+
+		using HttpResponseMessage first = await fixture.Client.SendAsync(StateRequest(Body()));
+		DateTimeOffset cloned = fixture.Time.GetUtcNow();
+
+		TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		TaskCompletionSource fetched = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		fixture.Git.Before = async invocation =>
+		{
+			if (invocation.Arguments[0] == "fetch")
+			{
+				await release.Task.ConfigureAwait(false);
+				fetched.TrySetResult();
+			}
+		};
+
+		fixture.Time.Advance(TimeSpan.FromSeconds(45));
+
+		// A deadline, so a request that waits on the held fetch fails here rather than hanging the run.
+		using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(10));
+		using HttpResponseMessage second = await fixture.Client.SendAsync(StateRequest(Body()), deadline.Token);
+
+		Assert.AreEqual(HttpStatusCode.OK, second.StatusCode);
+		Assert.AreEqual(cloned, (await ReadAsync(second)).GetProperty("refsAsOf").GetDateTimeOffset());
+
+		// A third request while that fetch is still running neither waits on it nor starts another.
+		using HttpResponseMessage third = await fixture.Client.SendAsync(StateRequest(Body()), deadline.Token);
+		Assert.AreEqual(HttpStatusCode.OK, third.StatusCode);
+
+		release.SetResult();
+		await fetched.Task.WaitAsync(TimeSpan.FromSeconds(10));
+		Assert.AreEqual(1, fixture.Git.CountOf("fetch"));
+	}
+
+	[TestMethod]
+	public async Task Post_State_ServingStaleRefsTurnedOff_WaitsForTheFetch()
+	{
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync(new Dictionary<string, string?>
+		{
+			["GitBranchStateCache:RefsServeStaleFor"] = "00:00:00",
+		});
+		Seed(fixture.Git);
+
+		using HttpResponseMessage first = await fixture.Client.SendAsync(StateRequest(Body()));
+		fixture.Time.Advance(TimeSpan.FromSeconds(45));
+		using HttpResponseMessage second = await fixture.Client.SendAsync(StateRequest(Body()));
+
+		Assert.AreEqual(1, fixture.Git.CountOf("fetch"));
+		Assert.AreEqual(fixture.Time.GetUtcNow(), (await ReadAsync(second)).GetProperty("refsAsOf").GetDateTimeOffset());
+	}
+
+	[TestMethod]
+	public async Task Post_State_RepeatedRequests_FindEachMergeBaseOnce()
+	{
+		// Every heartbeat asks for the same merge bases until someone pulls or a branch moves. Asking git
+		// again for each one is a process per branch per request, which is most of a warm request's cost.
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync();
+		Seed(fixture.Git);
+
+		using HttpResponseMessage first = await fixture.Client.SendAsync(StateRequest(Body(patterns: "\"origin/*\"")));
+		using HttpResponseMessage second = await fixture.Client.SendAsync(StateRequest(Body(patterns: "\"origin/*\"")));
+
+		Assert.AreEqual(HttpStatusCode.OK, second.StatusCode);
+		Assert.AreEqual(2, fixture.Git.CountOf("merge-base"));
+	}
+
+	[TestMethod]
+	public async Task Post_State_WorksOnSeveralBranchesAtOnce()
+	{
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync();
+		Seed(fixture.Git);
+
+		int running = 0;
+		int peak = 0;
+		TaskCompletionSource bothStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		fixture.Git.Before = async invocation =>
+		{
+			if (invocation.Arguments[0] != "merge-base")
+			{
+				return;
+			}
+
+			int now = Interlocked.Increment(ref running);
+			InterlockedMax(ref peak, now);
+
+			if (now >= 2)
+			{
+				bothStarted.TrySetResult();
+			}
+
+			// Run one after the other, each would wait out the whole delay alone.
+			await Task.WhenAny(bothStarted.Task, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
+			Interlocked.Decrement(ref running);
+		};
+
+		using HttpResponseMessage response = await fixture.Client.SendAsync(StateRequest(Body(patterns: "\"origin/*\"")));
+
+		Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+		Assert.AreEqual(2, Volatile.Read(ref peak));
+	}
+
+	[TestMethod]
+	public async Task Post_State_BranchesFinishingOutOfOrder_AreReportedInTheOrderTheyMatched()
+	{
+		await using ServiceFixture sequential = await ServiceFixture.StartAsync(new Dictionary<string, string?>
+		{
+			["GitBranchStateCache:MaxConcurrentBranchQueries"] = "1",
+		});
+		Seed(sequential.Git);
+		using HttpResponseMessage expected = await sequential.Client.SendAsync(StateRequest(Body(patterns: "\"origin/*\"")));
+		string[] expectedOrder = BranchNames(await ReadAsync(expected));
+
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync();
+		Seed(fixture.Git);
+
+		// Hold back whichever branch matched first, so it finishes last.
+		string firstTip = fixture.Git.Branches[expectedOrder[0]["origin/".Length..]];
+		fixture.Git.Before = async invocation =>
+		{
+			if (invocation.Arguments[0] == "merge-base" && invocation.Arguments[^1] == firstTip)
+			{
+				await Task.Delay(200).ConfigureAwait(false);
+			}
+		};
+
+		using HttpResponseMessage response = await fixture.Client.SendAsync(StateRequest(Body(patterns: "\"origin/*\"")));
+
+		CollectionAssert.AreEqual(expectedOrder, BranchNames(await ReadAsync(response)));
+	}
+
+	[TestMethod]
+	public async Task Post_State_ACommitGraphThatCannotBeWritten_StillAnswers()
+	{
+		// The graph only makes merge bases faster. A mirror without one answers the same questions.
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync();
+		Seed(fixture.Git);
+		fixture.Git.CommitGraphFails = true;
+
+		using HttpResponseMessage response = await fixture.Client.SendAsync(StateRequest(Body()));
+
+		Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+		Assert.AreEqual(1, fixture.Git.CountOf("commit-graph"));
+	}
+
+	private static string[] BranchNames(JsonElement body) =>
+		[.. body.GetProperty("branches").EnumerateArray().Select(branch => branch.GetProperty("name").GetString()!)];
+
+	private static void InterlockedMax(ref int target, int value)
+	{
+		int current = Volatile.Read(ref target);
+
+		while (value > current)
+		{
+			int seen = Interlocked.CompareExchange(ref target, value, current);
+
+			if (seen == current)
+			{
+				return;
+			}
+
+			current = seen;
+		}
+	}
+
+	[TestMethod]
 	public async Task Post_State_ReportsHowOldTheRefsAre()
 	{
 		await using ServiceFixture fixture = await ServiceFixture.StartAsync();

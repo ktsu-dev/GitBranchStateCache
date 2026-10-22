@@ -128,6 +128,15 @@ public sealed class GitBranchStateCacheOptionsValidator : IValidateOptions<GitBr
 				$"{GitBranchStateCacheOptions.SectionName}:RefsTtl ({options.RefsTtl}) must not exceed AdmissionTtl ({options.AdmissionTtl}), or branch state could outlive the authorization that permits reading it.");
 		}
 
+		// Zero turns serving stale refs off. A window reaching past AdmissionTtl is not refused, because
+		// the fetcher caps it there, and refusing it would stop a deployment that already runs RefsTtl
+		// close to AdmissionTtl from starting after the upgrade that introduced the default.
+		if (options.RefsServeStaleFor < TimeSpan.Zero)
+		{
+			failures.Add(
+				$"{GitBranchStateCacheOptions.SectionName}:RefsServeStaleFor must not be negative. Use zero to make every request past RefsTtl wait on its fetch.");
+		}
+
 		// Zero is the documented way to keep every mirror indefinitely, so only a negative value is a
 		// mistake.
 		if (options.MirrorIdleMaxAge < TimeSpan.Zero)
@@ -142,6 +151,16 @@ public sealed class GitBranchStateCacheOptionsValidator : IValidateOptions<GitBr
 		if (options.MaxCachedDiffs <= 0)
 		{
 			failures.Add($"{GitBranchStateCacheOptions.SectionName}:MaxCachedDiffs must be greater than zero.");
+		}
+
+		if (options.MaxCachedMergeBases <= 0)
+		{
+			failures.Add($"{GitBranchStateCacheOptions.SectionName}:MaxCachedMergeBases must be greater than zero.");
+		}
+
+		if (options.MaxConcurrentBranchQueries <= 0)
+		{
+			failures.Add($"{GitBranchStateCacheOptions.SectionName}:MaxConcurrentBranchQueries must be greater than zero.");
 		}
 
 		if (options.MaxPathsPerRequest <= 0)

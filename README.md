@@ -135,11 +135,14 @@ Resolves wildcard patterns against the mirror's refs and returns names with tip 
   "GitBranchStateCache": {
     "MirrorRoot": "/var/lib/gitbranchstatecache",
     "RefsTtl": "00:00:30",
+    "RefsServeStaleFor": "00:00:30",
     "AdmissionTtl": "00:01:00",
     "FetchTimeout": "00:02:00",
     "DiffTimeout": "00:02:00",
     "ProbeTimeout": "00:00:30",
     "MaxCachedDiffs": 2000,
+    "MaxCachedMergeBases": 20000,
+    "MaxConcurrentBranchQueries": 4,
     "MaxPathsPerRequest": 20000,
     "MirrorIdleMaxAge": "30.00:00:00",
     "Upstreams": {
@@ -157,6 +160,10 @@ Resolves wildcard patterns against the mirror's refs and returns names with tip 
 ```
 
 Startup validation refuses to run with no upstreams, an upstream with an empty or missing `Repositories` list, a pattern naming no literal segment, an unwritable mirror root, a `RefsTtl` above `AdmissionTtl`, or a non-positive timeout, and reports every problem at once.
+
+Refs younger than `RefsTtl` are answered from as they are. Past it, and for up to `RefsServeStaleFor` more, a request is still answered from the refs on disk while one fetch runs in the background, so editors on a heartbeat do not take turns waiting on the forge. That window is capped where `RefsTtl` plus it would pass `AdmissionTtl`, and refs older than that are fetched before answering. Set `RefsServeStaleFor` to zero to make every request past `RefsTtl` wait on its fetch. Every response carries `refsAsOf`, so a client can always see how old an answer is.
+
+Merge bases are cached by mirror, client base and branch tip, up to `MaxCachedMergeBases`, and diffs by merge base and tip, up to `MaxCachedDiffs`. A request whose answers are all cached starts no git processes beyond reading the refs. One that is not works on up to `MaxConcurrentBranchQueries` branches at a time. Each clone and fetch also writes a commit-graph, which is what keeps an uncached merge base quick on a long history.
 
 ## Deployment
 

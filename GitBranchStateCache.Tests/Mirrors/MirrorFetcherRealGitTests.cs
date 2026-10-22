@@ -201,6 +201,79 @@ public class MirrorFetcherRealGitTests
 	}
 
 	[TestMethod]
+	public async Task EnsureCurrentAsync_FirstRequest_WritesACommitGraph()
+	{
+		// Without one, every merge base is a commit walk that parses each commit out of the packs, and a
+		// state request asks for one per branch.
+		(MirrorFetcher fetcher, _, _, string directory) = Build();
+
+		await EnsureAsync(fetcher, directory);
+
+		Assert.IsTrue(HasCommitGraph(directory));
+	}
+
+	[TestMethod]
+	public async Task EnsureCurrentAsync_AfterAFetch_TheCommitGraphCoversTheNewCommits()
+	{
+		(MirrorFetcher fetcher, _, FakeTimeProvider time, string directory) = Build();
+
+		await EnsureAsync(fetcher, directory);
+		string before = CommitGraphFingerprint(directory);
+		Commit("Content/Maps/Foo.umap", "two", "second");
+
+		time.Advance(TimeSpan.FromMinutes(1));
+		await EnsureAsync(fetcher, directory);
+
+		// A graph that skipped the fetch would be byte for byte the one the clone wrote.
+		Assert.AreNotEqual(before, CommitGraphFingerprint(directory));
+		Git(directory, "commit-graph", "verify");
+	}
+
+	/// <summary>Names every commit-graph file with its length, so a rewritten graph reads differently.</summary>
+	private static string CommitGraphFingerprint(string directory)
+	{
+		string info = Path.Combine(directory, "objects", "info");
+
+		return string.Join(
+			'\n',
+			Directory.EnumerateFiles(info, "*graph*", SearchOption.AllDirectories)
+				.Order(StringComparer.Ordinal)
+				.Select(file => $"{Path.GetRelativePath(info, file)} {new FileInfo(file).Length}"));
+	}
+
+	[TestMethod]
+	public async Task EnsureCurrentAsync_WithinTheStaleWindow_AnswersFromDiskAndFetchesInTheBackground()
+	{
+		(MirrorFetcher fetcher, MirrorStore store, FakeTimeProvider time, string directory) = Build();
+
+		await EnsureAsync(fetcher, directory);
+		DateTimeOffset cloned = time.GetUtcNow();
+		Commit("Content/Maps/Foo.umap", "two", "second");
+		string moved = Git(_source, "rev-parse", "HEAD").Trim();
+
+		time.Advance(TimeSpan.FromSeconds(45));
+		MirrorFetchResult answered = await EnsureAsync(fetcher, directory);
+
+		// Answered with the refs on disk, and says how old they are.
+		Assert.AreEqual(MirrorFetchStatus.Current, answered.Status);
+		Assert.AreEqual(cloned, answered.RefsAsOf);
+
+		// The fetch it started lands without anything else asking.
+		using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(30));
+		while (store.RefsFetchedAt(directory) == cloned)
+		{
+			await Task.Delay(50, deadline.Token);
+		}
+
+		BranchRef main = (await BranchesAsync(directory)).Single(branch => branch.Name == "origin/main");
+		Assert.AreEqual(moved, main.Tip);
+	}
+
+	private static bool HasCommitGraph(string directory) =>
+		File.Exists(Path.Combine(directory, "objects", "info", "commit-graph"))
+		|| Directory.Exists(Path.Combine(directory, "objects", "info", "commit-graphs"));
+
+	[TestMethod]
 	public async Task EnsureCurrentAsync_ABranchDeletedUpstream_IsPrunedRatherThanKept()
 	{
 		// Without --prune a branch that was deleted upstream would keep being reported, and a client
