@@ -13,6 +13,11 @@ data:
   # thirty second heartbeat actually gets, and it must not exceed AdmissionTtl below, or branch state
   # could outlive the authorization that permits reading it.
   GitBranchStateCache__RefsTtl: "00:00:30"
+
+  # How much longer refs may be answered from while one fetch runs in the background, so the first
+  # editor after RefsTtl does not wait on the forge. Capped where RefsTtl plus this would pass
+  # AdmissionTtl. Set to 0 to make every request past RefsTtl wait on its fetch.
+  GitBranchStateCache__RefsServeStaleFor: "00:00:30"
   GitBranchStateCache__AdmissionTtl: "00:01:00"
 
   # A clone of a repository this service has never seen is the slow one; an incremental fetch is not.
@@ -23,6 +28,14 @@ data:
   # How many computed diffs are kept. The ratio to watch is diff cache hits against misses: a low
   # ratio means the team is spread across many integration points, and this is the number to raise.
   GitBranchStateCache__MaxCachedDiffs: "2000"
+
+  # One merge base per editor's base per branch. A few hundred bytes each, so the default covers a
+  # studio of dozens of editors asking about hundreds of branches.
+  GitBranchStateCache__MaxCachedMergeBases: "20000"
+
+  # How many branches one request works on at once when their answers are not cached. Each is a git
+  # process, so keep this near the CPU limit.
+  GitBranchStateCache__MaxConcurrentBranchQueries: "4"
 
   # Bounds one response. A long-lived branch can differ in a hundred thousand paths, so a client that
   # knows which assets it cares about should name them rather than omit the field.

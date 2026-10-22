@@ -56,4 +56,10 @@ internal static partial class MirrorLog
 		Level = LogLevel.Warning,
 		Message = "Could not remove the staging directory '{Staging}', left by a clone that did not finish.")]
 	public static partial void SweepStagingFailed(ILogger logger, Exception exception, string staging);
+
+	[LoggerMessage(
+		EventId = 1008,
+		Level = LogLevel.Warning,
+		Message = "Could not write a commit-graph for '{Repository}' from upstream '{Upstream}', so its merge bases are found more slowly: {Reason}")]
+	public static partial void CommitGraphNotWritten(ILogger logger, string repository, string upstream, string reason);
 }

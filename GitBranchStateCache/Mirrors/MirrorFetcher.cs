@@ -28,6 +28,17 @@ using Microsoft.Extensions.Options;
 /// still bounds it, because <see cref="IGitRunner"/> enforces the invocation's timeout itself.
 /// </para>
 /// <para>
+/// Refs a little past <see cref="GitBranchStateCacheOptions.RefsTtl"/> are answered from as they are
+/// while one fetch runs in the background, for up to
+/// <see cref="GitBranchStateCacheOptions.RefsServeStaleFor"/> and never past
+/// <see cref="GitBranchStateCacheOptions.AdmissionTtl"/>. Older refs are fetched before answering.
+/// </para>
+/// <para>
+/// Every clone and fetch is followed by a commit-graph write. A state request finds one merge base per
+/// branch, and without a graph each is a walk that parses every commit it passes out of the packs.
+/// Failing to write one costs speed, never an answer, so it is not treated as a failure.
+/// </para>
+/// <para>
 /// A clone lands in a temporary directory and is moved into place only once it has finished. A crash
 /// part way through a clone of a large repository would otherwise leave a directory that looks like a
 /// mirror, and every later request would be answered from a repository missing most of its history.
@@ -69,10 +80,20 @@ public sealed class MirrorFetcher(
 		bool exists = mirrors.Exists(directory);
 		DateTimeOffset? fetchedAt = exists ? mirrors.RefsFetchedAt(directory) : null;
 
-		if (exists && fetchedAt is DateTimeOffset current
-			&& timeProvider.GetUtcNow() - current < settings.RefsTtl)
+		if (exists && fetchedAt is DateTimeOffset current)
 		{
-			return MirrorFetchResult.Current(current);
+			TimeSpan age = timeProvider.GetUtcNow() - current;
+
+			if (age < settings.RefsTtl)
+			{
+				return MirrorFetchResult.Current(current);
+			}
+
+			if (age < settings.RefsTtl + StaleWindow(settings))
+			{
+				RefreshInBackground(key, directory, repositoryUrl, upstreamBase, authorization, fetchedAt);
+				return MirrorFetchResult.Current(current);
+			}
 		}
 
 		IWorkTicket ticket = flights.Acquire(key.ToFlightKey());
@@ -88,6 +109,72 @@ public sealed class MirrorFetcher(
 			key, directory, repositoryUrl, upstreamBase, authorization, exists, fetchedAt, ticket);
 
 		return await work.WaitAsync(cancellationToken).ConfigureAwait(false);
+	}
+
+	/// <summary>
+	/// How long past <see cref="GitBranchStateCacheOptions.RefsTtl"/> refs may be answered from while a
+	/// fetch runs in the background.
+	/// </summary>
+	/// <remarks>
+	/// Capped so the refs answered from are never older than
+	/// <see cref="GitBranchStateCacheOptions.AdmissionTtl"/>, the same rule the validator holds
+	/// <see cref="GitBranchStateCacheOptions.RefsTtl"/> to.
+	/// </remarks>
+	private static TimeSpan StaleWindow(GitBranchStateCacheOptions settings)
+	{
+		TimeSpan room = settings.AdmissionTtl - settings.RefsTtl;
+		TimeSpan window = settings.RefsServeStaleFor < room ? settings.RefsServeStaleFor : room;
+		return window > TimeSpan.Zero ? window : TimeSpan.Zero;
+	}
+
+	/// <summary>
+	/// Starts a fetch nobody waits on, unless one is already running for this repository.
+	/// </summary>
+	/// <remarks>
+	/// Runs under the requesting caller's credential, which the admission gate has just proven, exactly
+	/// as a fetch the request waited on would. A request arriving while it runs is answered from disk
+	/// rather than queued behind it.
+	/// </remarks>
+	[System.Diagnostics.CodeAnalysis.SuppressMessage(
+		"Reliability",
+		"CA2025:Ensure tasks using 'IDisposable' instances complete before the instances are disposed",
+		Justification = "The ticket is handed to LeadAsync, which owns it and disposes it when the fetch finishes. Nothing here disposes it.")]
+	private void RefreshInBackground(
+		MirrorKey key,
+		string directory,
+		Uri repositoryUrl,
+		Uri upstreamBase,
+		string? authorization,
+		DateTimeOffset? fetchedAt)
+	{
+		IWorkTicket ticket = flights.Acquire(key.ToFlightKey());
+
+		if (!ticket.IsLeader)
+		{
+			ticket.Dispose();
+			return;
+		}
+
+		_ = ObserveAsync(LeadAsync(key, directory, repositoryUrl, upstreamBase, authorization, exists: true, fetchedAt, ticket));
+	}
+
+	/// <summary>
+	/// Waits on background work so its failure is observed rather than left for the finalizer.
+	/// </summary>
+	/// <remarks>
+	/// A fetch that fails has already recorded and logged it. What reaches here is host shutdown
+	/// cancelling it, which is nobody's problem.
+	/// </remarks>
+	private static async Task ObserveAsync(Task<MirrorFetchResult> work)
+	{
+		try
+		{
+			await work.ConfigureAwait(false);
+		}
+		catch (OperationCanceledException)
+		{
+			// The host is stopping.
+		}
 	}
 
 	/// <summary>
@@ -216,6 +303,7 @@ public sealed class MirrorFetcher(
 				return MirrorFetchResult.Unavailable($"Could not configure the mirror: {configure.Summary}");
 			}
 
+			await WriteCommitGraphAsync(key, staging, cancellationToken).ConfigureAwait(false);
 			MoveIntoPlace(staging, directory);
 		}
 		finally
@@ -261,8 +349,36 @@ public sealed class MirrorFetcher(
 			return MirrorFetchResult.Stale(fetchedAt, $"The fetch did not succeed: {fetch.Summary}");
 		}
 
+		await WriteCommitGraphAsync(key, directory, cancellationToken).ConfigureAwait(false);
+
 		mirrors.MarkFetched(directory);
 		return MirrorFetchResult.Current(mirrors.RefsFetchedAt(directory) ?? timeProvider.GetUtcNow());
+	}
+
+	/// <summary>
+	/// Brings the mirror's commit-graph up to date with its refs.
+	/// </summary>
+	/// <remarks>
+	/// Split, so after a fetch only the new commits are written as a layer of their own rather than the
+	/// whole history again. Bounded by the fetch timeout because it is part of the same work, and its
+	/// failure is logged and otherwise ignored, because a mirror without a graph answers the same
+	/// questions more slowly.
+	/// </remarks>
+	private async Task WriteCommitGraphAsync(MirrorKey key, string directory, CancellationToken cancellationToken)
+	{
+		GitResult graph = await runner.RunAsync(
+			new GitInvocation
+			{
+				WorkingDirectory = directory,
+				Arguments = ["commit-graph", "write", "--reachable", "--split", "--no-progress"],
+				Timeout = options.Value.FetchTimeout,
+			},
+			cancellationToken).ConfigureAwait(false);
+
+		if (!graph.Succeeded)
+		{
+			MirrorLog.CommitGraphNotWritten(logger, key.RepositoryPath, key.Upstream, graph.Summary);
+		}
 	}
 
 	/// <summary>

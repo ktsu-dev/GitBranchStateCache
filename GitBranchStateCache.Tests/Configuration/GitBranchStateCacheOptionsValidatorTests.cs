@@ -107,6 +107,64 @@ public class GitBranchStateCacheOptionsValidatorTests
 	}
 
 	[TestMethod]
+	public void Validate_RefsServeStaleForPastAdmissionTtl_Succeeds()
+	{
+		// Capped where it is used rather than refused here, so a deployment whose RefsTtl already sits
+		// close to AdmissionTtl keeps starting after an upgrade that introduced the default.
+		GitBranchStateCacheOptions options = Valid();
+		options.RefsTtl = TimeSpan.FromMinutes(1);
+		options.AdmissionTtl = TimeSpan.FromMinutes(1);
+
+		Assert.IsTrue(Validate(options).Succeeded);
+	}
+
+	[TestMethod]
+	public void Validate_NegativeRefsServeStaleFor_Fails()
+	{
+		GitBranchStateCacheOptions options = Valid();
+		options.RefsServeStaleFor = TimeSpan.FromSeconds(-1);
+
+		ValidateOptionsResult result = Validate(options);
+
+		Assert.IsTrue(result.Failed);
+		Assert.Contains("RefsServeStaleFor", result.FailureMessage);
+	}
+
+	[TestMethod]
+	public void Validate_ZeroRefsServeStaleFor_Succeeds()
+	{
+		// Zero is how a deployment makes every request past RefsTtl wait on its fetch.
+		GitBranchStateCacheOptions options = Valid();
+		options.RefsServeStaleFor = TimeSpan.Zero;
+
+		Assert.IsTrue(Validate(options).Succeeded);
+	}
+
+	[TestMethod]
+	public void Validate_NonPositiveMaxCachedMergeBases_Fails()
+	{
+		GitBranchStateCacheOptions options = Valid();
+		options.MaxCachedMergeBases = 0;
+
+		ValidateOptionsResult result = Validate(options);
+
+		Assert.IsTrue(result.Failed);
+		Assert.Contains("MaxCachedMergeBases", result.FailureMessage);
+	}
+
+	[TestMethod]
+	public void Validate_NonPositiveMaxConcurrentBranchQueries_Fails()
+	{
+		GitBranchStateCacheOptions options = Valid();
+		options.MaxConcurrentBranchQueries = 0;
+
+		ValidateOptionsResult result = Validate(options);
+
+		Assert.IsTrue(result.Failed);
+		Assert.Contains("MaxConcurrentBranchQueries", result.FailureMessage);
+	}
+
+	[TestMethod]
 	[DataRow("RefsTtl")]
 	[DataRow("FetchTimeout")]
 	[DataRow("DiffTimeout")]

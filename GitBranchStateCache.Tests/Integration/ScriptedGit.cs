@@ -40,6 +40,9 @@ internal sealed class ScriptedGit(MockFileSystem fileSystem) : IGitRunner
 	/// <summary>Gets or sets whether a diff times out rather than answering.</summary>
 	public bool DiffTimesOut { get; set; }
 
+	/// <summary>Gets or sets whether writing a commit-graph fails.</summary>
+	public bool CommitGraphFails { get; set; }
+
 	/// <summary>Gets or sets work to run before a given subcommand answers, for concurrency tests.</summary>
 	public Func<GitInvocation, Task>? Before { get; set; }
 
@@ -70,6 +73,9 @@ internal sealed class ScriptedGit(MockFileSystem fileSystem) : IGitRunner
 			"clone" => Clone(arguments),
 			"config" => Success(string.Empty),
 			"fetch" => Success(string.Empty),
+			"commit-graph" => CommitGraphFails
+				? new GitResult(128, string.Empty, "fatal: could not write commit-graph", TimedOut: false)
+				: Success(string.Empty),
 			"for-each-ref" => Success(ForEachRef()),
 			"cat-file" => CatFile(arguments),
 			"merge-base" => MergeBase(arguments),
