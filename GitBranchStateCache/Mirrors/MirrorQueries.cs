@@ -105,7 +105,7 @@ public sealed class MirrorQueries(IGitRunner runner, IOptions<GitBranchStateCach
 	{
 		lock (_gate)
 		{
-			if (!_mergeBases.TryGetValue(cacheKey, out LinkedListNode<KeyValuePair<string, string>>? node))
+			if (!_mergeBases.TryGetValue(cacheKey, out LinkedListNode<KeyValuePair<string, string>>? node) || node is null)
 			{
 				return null;
 			}
