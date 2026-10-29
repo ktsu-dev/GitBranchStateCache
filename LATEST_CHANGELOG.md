@@ -1,8 +1,6 @@
-## v1.1.1-pre.1 (prerelease)
+## v1.1.1-pre.2 (prerelease)
 
-Changes since v1.1.0:
+Changes since v1.1.1-pre.1:
 
-- Bump MSTest.Sdk from 4.5.1 to 4.5.2 (dependabot[bot])
-- Bump the system group with 1 update (dependabot[bot])
-- Bump the microsoft group with 1 update (dependabot[bot])
+- Bump Testably.Abstractions.Testing from 7.1.1 to 7.1.2 (dependabot[bot])
 
