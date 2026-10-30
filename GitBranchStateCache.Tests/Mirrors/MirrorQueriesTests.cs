@@ -84,6 +84,42 @@ public class MirrorQueriesTests
 	}
 
 	[TestMethod]
+	public async Task FindMergeBaseAsync_UnrelatedHistories_RunsGitOnce()
+	{
+		// An orphan branch such as gh-pages shares no history with the base. git has to walk both
+		// histories in full to say so, and the answer never changes, so it is asked only once.
+		FakeGitRunner runner = new()
+		{
+			Respond = _ => new GitResult(1, string.Empty, string.Empty, TimedOut: false),
+		};
+		MirrorQueries queries = Build(runner);
+
+		string? first = await queries.FindMergeBaseAsync(Mirror, Base, Tip, CancellationToken.None);
+		string? second = await queries.FindMergeBaseAsync(Mirror, Base, Tip, CancellationToken.None);
+
+		Assert.IsNull(first);
+		Assert.IsNull(second);
+		Assert.AreEqual(1, runner.CountOf("merge-base"));
+	}
+
+	[TestMethod]
+	public async Task FindMergeBaseAsync_AnError_IsNotRemembered()
+	{
+		// Exit codes above 1 are errors, such as a missing object, and say nothing about the commits.
+		FakeGitRunner runner = new()
+		{
+			Respond = _ => new GitResult(128, string.Empty, "fatal: Not a valid commit name", TimedOut: false),
+		};
+		MirrorQueries queries = Build(runner);
+
+		string? first = await queries.FindMergeBaseAsync(Mirror, Base, Tip, CancellationToken.None);
+		await queries.FindMergeBaseAsync(Mirror, Base, Tip, CancellationToken.None);
+
+		Assert.IsNull(first);
+		Assert.AreEqual(2, runner.CountOf("merge-base"));
+	}
+
+	[TestMethod]
 	public async Task FindMergeBaseAsync_OverTheLimit_ForgetsTheLeastRecentlyUsed()
 	{
 		FakeGitRunner runner = Answering(ForkPoint);

@@ -14,6 +14,11 @@ using Microsoft.Extensions.Options;
 /// invalidating, and every editor's heartbeat asks for the same few hundred of them until someone
 /// pulls or a branch moves. Without this, a request naming a few hundred branches starts a few hundred
 /// git processes before it can answer anything from the diff cache.
+/// <para>
+/// "No common history" is remembered too, for the same reason: it is just as immutable, and it is the
+/// most expensive answer git gives, because it has to walk both histories in full to reach it. A
+/// timeout or any other failure says nothing about the commits and is never remembered.
+/// </para>
 /// </remarks>
 /// <param name="runner">Runs git.</param>
 /// <param name="options">The configured options.</param>
@@ -21,6 +26,11 @@ public sealed class MirrorQueries(IGitRunner runner, IOptions<GitBranchStateCach
 {
 	private readonly Dictionary<string, LinkedListNode<KeyValuePair<string, string>>> _mergeBases =
 		new(StringComparer.Ordinal);
+
+	/// <summary>
+	/// Stands in the cache for "these two commits share no history". An object id is never empty.
+	/// </summary>
+	private const string NoMergeBase = "";
 
 	private readonly LinkedList<KeyValuePair<string, string>> _recency = new();
 	private readonly Lock _gate = new();
@@ -66,7 +76,7 @@ public sealed class MirrorQueries(IGitRunner runner, IOptions<GitBranchStateCach
 		// produce the same key.
 		string cacheKey = $"{directory}\n{first}\n{second}";
 
-		if (TryRead(cacheKey) is string cached)
+		if (TryRead(cacheKey, out string? cached))
 		{
 			return cached;
 		}
@@ -83,10 +93,16 @@ public sealed class MirrorQueries(IGitRunner runner, IOptions<GitBranchStateCach
 			},
 			cancellationToken).ConfigureAwait(false);
 
+		if (IsUnrelatedHistories(result))
+		{
+			// A real answer rather than a failure: there is nothing to diff against, and there never
+			// will be for these two commits.
+			Publish(cacheKey, NoMergeBase);
+			return null;
+		}
+
 		if (!result.Succeeded)
 		{
-			// Exit code 1 means the histories are unrelated, which is a real answer rather than a
-			// failure, and both are handled the same way: there is nothing to diff against.
 			return null;
 		}
 
@@ -101,18 +117,30 @@ public sealed class MirrorQueries(IGitRunner runner, IOptions<GitBranchStateCach
 		return merged;
 	}
 
-	private string? TryRead(string cacheKey)
+	/// <summary>
+	/// Whether git answered that the two commits share no history, as opposed to failing or timing out.
+	/// </summary>
+	/// <remarks>
+	/// <c>git merge-base</c> exits 1 with nothing on standard output when there is no common ancestor.
+	/// Errors such as a missing object exit with a higher code and say why on standard error.
+	/// </remarks>
+	private static bool IsUnrelatedHistories(GitResult result) =>
+		!result.TimedOut && result.ExitCode == 1 && string.IsNullOrWhiteSpace(result.StandardOutput);
+
+	private bool TryRead(string cacheKey, out string? mergeBase)
 	{
 		lock (_gate)
 		{
 			if (!_mergeBases.TryGetValue(cacheKey, out LinkedListNode<KeyValuePair<string, string>>? node) || node is null)
 			{
-				return null;
+				mergeBase = null;
+				return false;
 			}
 
 			_recency.Remove(node);
 			_recency.AddFirst(node);
-			return node.Value.Value;
+			mergeBase = node.Value.Value.Length == 0 ? null : node.Value.Value;
+			return true;
 		}
 	}
 
