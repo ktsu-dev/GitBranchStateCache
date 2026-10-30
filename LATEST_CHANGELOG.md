@@ -1,6 +1,7 @@
-## v1.1.1-pre.2 (prerelease)
+## v1.1.1 (patch)
 
-Changes since v1.1.1-pre.1:
+Changes since v1.1.0:
 
-- Bump Testably.Abstractions.Testing from 7.1.1 to 7.1.2 (dependabot[bot])
+- Stop git discovery at the mirror directory [patch] (Claude)
+- Remember when a branch shares no history with the base [patch] (Claude)
 
