@@ -169,6 +169,34 @@ public class GitRunnerTests
 	}
 
 	[TestMethod]
+	public void BuildEnvironment_WithAWorkingDirectory_StopsDiscoveryAtIt()
+	{
+		string mirror = Path.Combine(TempRoot, "github", "studio", "game");
+
+		Dictionary<string, string?> environment = GitRunner.BuildEnvironment(
+			new GitInvocation { WorkingDirectory = mirror, Arguments = ["for-each-ref"], Timeout = TimeSpan.FromSeconds(1) },
+			new GitBranchStateCacheOptions { MirrorRoot = TempRoot },
+			new Hashtable { ["GIT_CEILING_DIRECTORIES"] = "/somewhere/inherited" });
+
+		// git still finds the repository the directory itself holds, but a directory that is no longer
+		// one fails instead of being answered from an enclosing repository.
+		Assert.AreEqual(Path.GetDirectoryName(Path.GetFullPath(mirror)), environment["GIT_CEILING_DIRECTORIES"]);
+	}
+
+	[TestMethod]
+	public void BuildEnvironment_WithoutAWorkingDirectory_SetsNoCeiling()
+	{
+		Dictionary<string, string?> environment = GitRunner.BuildEnvironment(
+			new GitInvocation { Arguments = ["--version"], Timeout = TimeSpan.FromSeconds(1) },
+			new GitBranchStateCacheOptions { MirrorRoot = TempRoot },
+			new Hashtable { ["GIT_CEILING_DIRECTORIES"] = "/somewhere/inherited" });
+
+		// Dropped like every other inherited GIT_* variable, and nothing is put in its place.
+		Assert.IsTrue(environment.TryGetValue("GIT_CEILING_DIRECTORIES", out string? ceiling));
+		Assert.IsNull(ceiling);
+	}
+
+	[TestMethod]
 	public void BuildEnvironment_WithACredential_ScopesItToTheUpstream()
 	{
 		const string credential = "Basic dXNlcjp0b2tlbg==";
