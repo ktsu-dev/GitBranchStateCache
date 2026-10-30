@@ -110,6 +110,21 @@ public class RealRepositoryTests
 	}
 
 	[TestMethod]
+	public async Task RefResolver_ABrokenMirrorInsideAnotherRepository_ReadsNothing()
+	{
+		// A mirror directory left holding only .last-used (the reaper racing MarkUsed), under a mirror
+		// root that sits inside a checkout. Git must not walk up and answer from the checkout.
+		string broken = Path.Combine(_workTree, "mirrors", "github", "studio", "other", "mirror.git");
+		Directory.CreateDirectory(broken);
+		await File.WriteAllTextAsync(Path.Combine(broken, ".last-used"), string.Empty);
+
+		IReadOnlyList<BranchRef>? branches = await new RefResolver(Runner, Options.Create(Settings))
+			.ListAsync(broken, CancellationToken.None);
+
+		Assert.IsNull(branches, $"Read {branches?.Count} branches from the enclosing repository.");
+	}
+
+	[TestMethod]
 	public async Task MirrorQueries_FindsTheForkPointAsTheMergeBase()
 	{
 		MirrorQueries queries = new(Runner, Options.Create(Settings));

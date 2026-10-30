@@ -186,6 +186,18 @@ public sealed class GitRunner(IOptions<GitBranchStateCacheOptions> options) : IG
 		// unplanned fetch in production.
 		environment["GIT_NO_LAZY_FETCH"] = "1";
 
+		// Discovery stops at the directory the run was given. Without a ceiling, a mirror directory that
+		// is no longer a repository (a partial delete, the reaper racing MarkUsed) does not fail: git
+		// walks up to the first enclosing repository and answers from that, which serves one
+		// repository's branches to a caller admitted only for another (ktsu-dev/GitBranchStateCache#104).
+		// A ceiling rather than GIT_DIR, because a clone and its staging directory run before they are
+		// repositories, and the ceiling still lets git find the repository the directory itself holds.
+		if (invocation.WorkingDirectory is not null
+			&& Path.GetDirectoryName(Path.GetFullPath(invocation.WorkingDirectory)) is { Length: > 0 } ceiling)
+		{
+			environment["GIT_CEILING_DIRECTORIES"] = ceiling;
+		}
+
 		ApplyConfigEnvironment(environment, invocation);
 		return environment;
 	}
