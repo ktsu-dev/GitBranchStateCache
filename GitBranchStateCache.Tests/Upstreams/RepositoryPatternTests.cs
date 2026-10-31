@@ -60,4 +60,54 @@ public class RepositoryPatternTests
 
 		Assert.IsFalse(pattern!.Matches("studio/gameXgit"));
 	}
+
+	[TestMethod]
+	[DataRow("studio/*-*-*", "studio", 1000)]
+	[DataRow("studio/*-*", "studio", 4000)]
+	[DataRow("team/*-svc-*", "team", 4000)]
+	public void Matches_SeveralStarsInOneSegment_RejectsALongNonMatchingPathWithoutTimingOut(string text, string owner, int dashes)
+	{
+		// Two stars in one segment are adjacent [^/]* runs, which a backtracking engine takes
+		// polynomial time to reject. The allow-list runs before admission, so an unauthenticated
+		// caller could otherwise time the match out and get a 500 instead of a 404 (#111).
+		Assert.IsTrue(RepositoryPattern.TryParse(text, out RepositoryPattern? pattern, out _));
+		string path = $"{owner}/{new string('-', dashes)}/x";
+
+		// Warm the expression up on a short path first, so the timing below measures the match rather
+		// than the engine building its automaton.
+		_ = pattern!.Matches($"{owner}/a/x");
+
+		System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+		bool matched = pattern.Matches(path);
+		stopwatch.Stop();
+
+		Assert.IsFalse(matched);
+		Assert.IsLessThan(50, stopwatch.ElapsedMilliseconds);
+	}
+
+	[TestMethod]
+	public void Matches_SeveralStarsInOneSegment_StillMatchesWhatItShould()
+	{
+		Assert.IsTrue(RepositoryPattern.TryParse("team/*-svc-*", out RepositoryPattern? pattern, out _));
+
+		Assert.IsTrue(pattern!.Matches("team/billing-svc-api"));
+		Assert.IsTrue(pattern.Matches("Team/Billing-SVC-Api"));
+		Assert.IsFalse(pattern.Matches("team/billing-api"));
+		Assert.IsFalse(pattern.Matches("team/billing-svc-api/extra"));
+	}
+
+	[TestMethod]
+	public void Matches_WhenTheMatchTimesOut_IsNotAllowedRatherThanThrowing()
+	{
+		// The allow-list runs before admission, so a timeout must read as "not allowed" (a 404) and
+		// never escape as an unhandled RegexMatchTimeoutException (a 500).
+		Assert.IsTrue(RepositoryPattern.TryParse(
+			"studio/**",
+			TimeSpan.FromTicks(1),
+			out RepositoryPattern? pattern,
+			out _));
+		string path = $"studio/{new string('a', 4_000_000)}";
+
+		Assert.IsFalse(pattern!.Matches(path));
+	}
 }

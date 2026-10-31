@@ -18,9 +18,10 @@ public sealed class RepositoryPattern
 	/// How long a single match may run before it is abandoned.
 	/// </summary>
 	/// <remarks>
-	/// The translated patterns have no backtracking construct, so this cannot fire in practice. It is
-	/// set because a regular expression built from configuration and run against a request path is
-	/// exactly the shape that should carry a timeout.
+	/// The patterns are matched with <see cref="RegexOptions.NonBacktracking"/>, which runs in time
+	/// linear in the path, so this should not fire. It is kept because a regular expression built from
+	/// configuration and run against a request path is exactly the shape that should carry a timeout,
+	/// and <see cref="Matches"/> reads a timeout as no match.
 	/// </remarks>
 	private static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(100);
 
@@ -48,7 +49,18 @@ public sealed class RepositoryPattern
 	/// <param name="parsed">The translated pattern, when it was acceptable.</param>
 	/// <param name="failure">Why the pattern was refused, when it was.</param>
 	/// <returns><see langword="true"/> when the pattern was acceptable.</returns>
-	public static bool TryParse(string? pattern, out RepositoryPattern? parsed, out string? failure)
+	public static bool TryParse(string? pattern, out RepositoryPattern? parsed, out string? failure) =>
+		TryParse(pattern, MatchTimeout, out parsed, out failure);
+
+	/// <summary>
+	/// Translates a configured pattern with a given match timeout, so a test can reach the timeout path.
+	/// </summary>
+	/// <param name="pattern">The pattern as configured.</param>
+	/// <param name="matchTimeout">How long a single match may run before it is abandoned.</param>
+	/// <param name="parsed">The translated pattern, when it was acceptable.</param>
+	/// <param name="failure">Why the pattern was refused, when it was.</param>
+	/// <returns><see langword="true"/> when the pattern was acceptable.</returns>
+	internal static bool TryParse(string? pattern, TimeSpan matchTimeout, out RepositoryPattern? parsed, out string? failure)
 	{
 		parsed = null;
 		failure = null;
@@ -76,7 +88,7 @@ public sealed class RepositoryPattern
 			return false;
 		}
 
-		parsed = new RepositoryPattern(pattern, Translate(trimmed));
+		parsed = new RepositoryPattern(pattern, Translate(trimmed, matchTimeout));
 		return true;
 	}
 
@@ -85,7 +97,21 @@ public sealed class RepositoryPattern
 	/// </summary>
 	/// <param name="repositoryPath">The path following the upstream key, without surrounding slashes.</param>
 	/// <returns><see langword="true"/> when it matches.</returns>
-	public bool Matches(string repositoryPath) => _expression.IsMatch(repositoryPath);
+	/// <remarks>
+	/// This runs before admission, on a path an unauthenticated caller chose, so a match that runs out
+	/// of time is refused as not allowed rather than surfacing as a server error.
+	/// </remarks>
+	public bool Matches(string repositoryPath)
+	{
+		try
+		{
+			return _expression.IsMatch(repositoryPath);
+		}
+		catch (RegexMatchTimeoutException)
+		{
+			return false;
+		}
+	}
 
 	private static bool IsLiteral(string segment) =>
 		segment.Length > 0 && !segment.Contains('*', StringComparison.Ordinal);
@@ -100,11 +126,17 @@ public sealed class RepositoryPattern
 	/// replacement for the double contains no backslash, so the second replacement cannot reach inside
 	/// it.
 	/// <para>
+	/// Two single stars in one segment, as in <c>team/*-svc-*</c>, translate to adjacent
+	/// <c>[^/]*</c> runs, which a backtracking engine takes polynomial time to reject on a long
+	/// segment. The expression is therefore built with <see cref="RegexOptions.NonBacktracking"/>,
+	/// whose matching time is linear in the path whatever the pattern.
+	/// </para>
+	/// <para>
 	/// Matching is case insensitive because forge repository names are, and a pattern that fails only
 	/// because someone typed <c>Studio</c> is a support ticket rather than a control.
 	/// </para>
 	/// </remarks>
-	private static Regex Translate(string pattern)
+	private static Regex Translate(string pattern, TimeSpan matchTimeout)
 	{
 		string expression = Regex.Escape(pattern)
 			.Replace(@"\*\*", ".*", StringComparison.Ordinal)
@@ -112,7 +144,7 @@ public sealed class RepositoryPattern
 
 		return new Regex(
 			$"^{expression}$",
-			RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-			MatchTimeout);
+			RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking,
+			matchTimeout);
 	}
 }
