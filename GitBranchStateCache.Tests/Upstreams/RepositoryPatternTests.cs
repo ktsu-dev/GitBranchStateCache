@@ -95,4 +95,19 @@ public class RepositoryPatternTests
 		Assert.IsFalse(pattern.Matches("team/billing-api"));
 		Assert.IsFalse(pattern.Matches("team/billing-svc-api/extra"));
 	}
+
+	[TestMethod]
+	public void Matches_WhenTheMatchTimesOut_IsNotAllowedRatherThanThrowing()
+	{
+		// The allow-list runs before admission, so a timeout must read as "not allowed" (a 404) and
+		// never escape as an unhandled RegexMatchTimeoutException (a 500).
+		Assert.IsTrue(RepositoryPattern.TryParse(
+			"studio/**",
+			TimeSpan.FromTicks(1),
+			out RepositoryPattern? pattern,
+			out _));
+		string path = $"studio/{new string('a', 4_000_000)}";
+
+		Assert.IsFalse(pattern!.Matches(path));
+	}
 }

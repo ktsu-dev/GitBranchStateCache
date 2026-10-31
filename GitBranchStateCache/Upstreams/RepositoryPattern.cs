@@ -49,7 +49,18 @@ public sealed class RepositoryPattern
 	/// <param name="parsed">The translated pattern, when it was acceptable.</param>
 	/// <param name="failure">Why the pattern was refused, when it was.</param>
 	/// <returns><see langword="true"/> when the pattern was acceptable.</returns>
-	public static bool TryParse(string? pattern, out RepositoryPattern? parsed, out string? failure)
+	public static bool TryParse(string? pattern, out RepositoryPattern? parsed, out string? failure) =>
+		TryParse(pattern, MatchTimeout, out parsed, out failure);
+
+	/// <summary>
+	/// Translates a configured pattern with a given match timeout, so a test can reach the timeout path.
+	/// </summary>
+	/// <param name="pattern">The pattern as configured.</param>
+	/// <param name="matchTimeout">How long a single match may run before it is abandoned.</param>
+	/// <param name="parsed">The translated pattern, when it was acceptable.</param>
+	/// <param name="failure">Why the pattern was refused, when it was.</param>
+	/// <returns><see langword="true"/> when the pattern was acceptable.</returns>
+	internal static bool TryParse(string? pattern, TimeSpan matchTimeout, out RepositoryPattern? parsed, out string? failure)
 	{
 		parsed = null;
 		failure = null;
@@ -77,7 +88,7 @@ public sealed class RepositoryPattern
 			return false;
 		}
 
-		parsed = new RepositoryPattern(pattern, Translate(trimmed));
+		parsed = new RepositoryPattern(pattern, Translate(trimmed, matchTimeout));
 		return true;
 	}
 
@@ -125,7 +136,7 @@ public sealed class RepositoryPattern
 	/// because someone typed <c>Studio</c> is a support ticket rather than a control.
 	/// </para>
 	/// </remarks>
-	private static Regex Translate(string pattern)
+	private static Regex Translate(string pattern, TimeSpan matchTimeout)
 	{
 		string expression = Regex.Escape(pattern)
 			.Replace(@"\*\*", ".*", StringComparison.Ordinal)
@@ -134,6 +145,6 @@ public sealed class RepositoryPattern
 		return new Regex(
 			$"^{expression}$",
 			RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking,
-			MatchTimeout);
+			matchTimeout);
 	}
 }
