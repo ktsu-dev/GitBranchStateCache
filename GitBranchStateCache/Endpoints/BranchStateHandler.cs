@@ -141,7 +141,11 @@ internal sealed class BranchStateHandler(
 				+ "which 'git rev-parse @{upstream}' produces without touching the network.");
 		}
 
-		if (!TryParsePatterns(request.BranchPatterns, out List<BranchPattern> patterns, out string? patternFailure))
+		if (!TryParsePatterns(
+			request.BranchPatterns,
+			options.Value.MaxBranchPatternsPerRequest,
+			out List<BranchPattern> patterns,
+			out string? patternFailure))
 		{
 			return BadRequest(patternFailure!);
 		}
@@ -407,7 +411,11 @@ internal sealed class BranchStateHandler(
 				.Select(pattern => pattern!)
 		];
 
-		if (!TryParsePatterns(requested, out List<BranchPattern> patterns, out string? patternFailure))
+		if (!TryParsePatterns(
+			requested,
+			options.Value.MaxBranchPatternsPerRequest,
+			out List<BranchPattern> patterns,
+			out string? patternFailure))
 		{
 			return BadRequest(patternFailure!);
 		}
@@ -532,6 +540,7 @@ internal sealed class BranchStateHandler(
 
 	private static bool TryParsePatterns(
 		IReadOnlyList<string>? requested,
+		int limit,
 		out List<BranchPattern> patterns,
 		out string? failure)
 	{
@@ -541,6 +550,12 @@ internal sealed class BranchStateHandler(
 		if (requested is null || requested.Count == 0)
 		{
 			failure = "At least one branch pattern is required.";
+			return false;
+		}
+
+		if (requested.Count > limit)
+		{
+			failure = $"The request named {requested.Count} branch patterns, and at most {limit} may be sent.";
 			return false;
 		}
 

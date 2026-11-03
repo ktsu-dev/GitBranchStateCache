@@ -144,6 +144,7 @@ Resolves wildcard patterns against the mirror's refs and returns names with tip 
     "MaxCachedMergeBases": 20000,
     "MaxConcurrentBranchQueries": 4,
     "MaxPathsPerRequest": 20000,
+    "MaxBranchPatternsPerRequest": 256,
     "MirrorIdleMaxAge": "30.00:00:00",
     "Upstreams": {
       "github": {
@@ -164,6 +165,8 @@ Startup validation refuses to run with no upstreams, an upstream with an empty o
 Refs younger than `RefsTtl` are answered from as they are. Past it, and for up to `RefsServeStaleFor` more, a request is still answered from the refs on disk while one fetch runs in the background, so editors on a heartbeat do not take turns waiting on the forge. That window is capped where `RefsTtl` plus it would pass `AdmissionTtl`, and refs older than that are fetched before answering. Set `RefsServeStaleFor` to zero to make every request past `RefsTtl` wait on its fetch. Every response carries `refsAsOf`, so a client can always see how old an answer is.
 
 Merge bases are cached by mirror, client base and branch tip, up to `MaxCachedMergeBases`, and diffs by merge base and tip, up to `MaxCachedDiffs`. A request whose answers are all cached starts no git processes beyond reading the refs. One that is not works on up to `MaxConcurrentBranchQueries` branches at a time. Each clone and fetch also writes a commit-graph, which is what keeps an uncached merge base quick on a long history.
+
+A request may name up to `MaxPathsPerRequest` paths and up to `MaxBranchPatternsPerRequest` branch patterns. Every pattern is matched against every branch in the mirror, so a request over either limit is refused with a 400 before anything is fetched.
 
 ## Deployment
 

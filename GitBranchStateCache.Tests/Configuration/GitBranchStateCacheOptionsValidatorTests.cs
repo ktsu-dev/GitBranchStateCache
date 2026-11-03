@@ -153,6 +153,20 @@ public class GitBranchStateCacheOptionsValidatorTests
 	}
 
 	[TestMethod]
+	[DataRow(0)]
+	[DataRow(-1)]
+	public void Validate_NonPositiveMaxBranchPatternsPerRequest_Fails(int limit)
+	{
+		GitBranchStateCacheOptions options = Valid();
+		options.MaxBranchPatternsPerRequest = limit;
+
+		ValidateOptionsResult result = Validate(options);
+
+		Assert.IsTrue(result.Failed);
+		Assert.Contains("MaxBranchPatternsPerRequest", result.FailureMessage);
+	}
+
+	[TestMethod]
 	public void Validate_NonPositiveMaxConcurrentBranchQueries_Fails()
 	{
 		GitBranchStateCacheOptions options = Valid();
