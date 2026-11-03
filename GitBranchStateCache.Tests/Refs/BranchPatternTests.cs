@@ -248,4 +248,21 @@ public class BranchPatternTests
 	[TestMethod]
 	public void TryParse_ExcessivelyLong_IsRefused() =>
 		Assert.IsFalse(BranchPattern.TryParse(new string('a', 513), out _, out _));
+
+	[TestMethod]
+	[DataRow("origin/?", "origin/é", false)]
+	[DataRow("origin/??", "origin/é", true)]
+	[DataRow("origin/[é]", "origin/é", false)]
+	[DataRow("origin/caf??", "origin/café", true)]
+	[DataRow("origin/caf?", "origin/café", false)]
+	[DataRow("origin/café", "origin/café", true)]
+	[DataRow("origin/caf*", "origin/café", true)]
+	[DataRow("origin/x????", "origin/x😀", true)]
+	[DataRow("origin/x??", "origin/x😀", false)]
+	public void Matches_OutsideAscii_CountsUtf8BytesLikeGit(string pattern, string name, bool expected)
+	{
+		// git's wildmatch compares bytes, so ? and a bracket expression each take one byte of a
+		// multi-byte character (#115). BranchPatternGitParityTests checks the same against git itself.
+		Assert.AreEqual(expected, Parse(pattern).Matches(name));
+	}
 }

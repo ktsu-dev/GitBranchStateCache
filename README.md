@@ -122,7 +122,7 @@ A path absent from `paths` is unchanged on every queried branch relative to its 
 GET /v1/{upstream}/{repositoryPath}/branches?pattern=origin/release/*
 ```
 
-Resolves wildcard patterns against the mirror's refs and returns names with tip ids. This removes the other reason a client currently needs a network fetch on its heartbeat. Wildcards here cross path separators, matching `git branch --list`, so patterns a project already has keep meaning what they already mean.
+Resolves wildcard patterns against the mirror's refs and returns names with tip ids. This removes the other reason a client currently needs a network fetch on its heartbeat. Wildcards here cross path separators, matching `git branch --list`, so patterns a project already has keep meaning what they already mean. Like git, patterns are matched against the UTF-8 bytes of a name, so outside ASCII a `?` or a bracket expression matches one byte: `origin/caf??` matches `origin/café`, and `origin/caf?` does not.
 
 ### Health
 
