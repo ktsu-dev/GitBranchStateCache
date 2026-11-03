@@ -62,6 +62,12 @@ public class BranchPatternGitParityTests
 	{
 		try
 		{
+			// Git marks objects read-only, which Directory.Delete refuses on Windows.
+			foreach (string file in Directory.GetFiles(_repository, "*", SearchOption.AllDirectories))
+			{
+				File.SetAttributes(file, FileAttributes.Normal);
+			}
+
 			Directory.Delete(_repository, recursive: true);
 		}
 		catch (IOException)
