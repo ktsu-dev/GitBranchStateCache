@@ -259,6 +259,33 @@ public class StateFlowTests
 	}
 
 	[TestMethod]
+	public async Task ABranchNameThatIsNotUtf8_IsSkipped_AndEveryOtherBranchIsStillServed()
+	{
+		// "caf\xe9": a Latin-1 name git accepts. It used to fail the whole ref listing, so every request
+		// for the repository was a 502 until the branch was deleted upstream (#114).
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync();
+		Seed(fixture.Git);
+		fixture.Git.RawRefLines.Add($"{MainTip} refs/heads/feature/caf\u00e9\n");
+
+		using HttpRequestMessage branchesRequest = new(
+			HttpMethod.Get,
+			"/v1/github/studio/game.git/branches?pattern=origin/*");
+		branchesRequest.Headers.Authorization = AuthenticationHeaderValue.Parse(Credential);
+
+		using HttpResponseMessage branches = await fixture.Client.SendAsync(branchesRequest);
+		JsonElement branchesBody = await ReadAsync(branches);
+
+		Assert.AreEqual(HttpStatusCode.OK, branches.StatusCode);
+		string?[] names = [.. branchesBody.GetProperty("branches").EnumerateArray()
+			.Select(branch => branch.GetProperty("name").GetString())];
+		CollectionAssert.AreEquivalent(new[] { "origin/main", "origin/release/1.0" }, names);
+
+		using HttpResponseMessage state = await fixture.Client.SendAsync(StateRequest(Body()));
+
+		Assert.AreEqual(HttpStatusCode.OK, state.StatusCode);
+	}
+
+	[TestMethod]
 	[DataRow("HEAD")]
 	[DataRow("main@{1}")]
 	[DataRow("--upload-pack=evil")]

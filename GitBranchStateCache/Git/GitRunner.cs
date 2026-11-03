@@ -83,7 +83,7 @@ public sealed class GitRunner(IOptions<GitBranchStateCacheOptions> options) : IG
 			: new(
 				chunk => standardOutput.Append(chunk),
 				chunk => standardError.Append(chunk),
-				StrictUtf8);
+				invocation.ReadStandardOutputAsBytes ? Encoding.Latin1 : StrictUtf8);
 
 		CommandOptions commandOptions = new()
 		{

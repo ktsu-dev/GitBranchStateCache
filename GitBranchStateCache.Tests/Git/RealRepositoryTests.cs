@@ -9,6 +9,7 @@ using ktsu.GitBranchStateCache.Diffs;
 using ktsu.GitBranchStateCache.Git;
 using ktsu.GitBranchStateCache.Mirrors;
 using ktsu.GitBranchStateCache.Refs;
+using ktsu.GitBranchStateCache.Tests.Fakes;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -107,6 +108,37 @@ public class RealRepositoryTests
 		Assert.IsNotNull(branches);
 		Assert.IsTrue(branches!.Any(branch => branch.Name == "origin/main" && branch.Tip == _mainTip));
 		Assert.IsTrue(branches!.Any(branch => branch.Name == "origin/feature/ui" && branch.Tip == _featureTip));
+	}
+
+	[TestMethod]
+	public async Task RefResolver_ABranchNameThatIsNotUtf8_IsSkipped()
+	{
+		// A copy of the mirror, so the bad ref does not leak into the other tests. The ref goes in
+		// through packed-refs because a file name with a lone 0xE9 byte cannot be spelled from .NET.
+		string copy = Path.Combine(Path.GetDirectoryName(_mirror)!, $"latin1-{Guid.NewGuid():N}.git");
+		Git(Path.GetDirectoryName(_mirror)!, "clone", "--bare", "--quiet", _mirror, copy);
+		byte[] line = [.. Encoding.ASCII.GetBytes($"{_featureTip} refs/heads/feature/caf"), 0xE9, (byte)'\n'];
+		string packedRefs = Path.Combine(copy, "packed-refs");
+
+		// The appended line is out of order, so the header must stop promising a sorted file, or git
+		// binary-searches past it.
+		string existing = (await File.ReadAllTextAsync(packedRefs)).Replace(" sorted", string.Empty, StringComparison.Ordinal);
+		await File.WriteAllBytesAsync(packedRefs, [.. Encoding.ASCII.GetBytes(existing), .. line]);
+		Assert.Contains("caf", Git(copy, "for-each-ref", "refs/heads/feature/"), "git did not take the fixture ref.");
+
+		List<string> skipped = [];
+		ListLogger<RefResolver> logger = new(skipped);
+
+		IReadOnlyList<BranchRef>? branches = await new RefResolver(Runner, Options.Create(Settings), logger)
+			.ListAsync(copy, CancellationToken.None);
+
+		Assert.IsNotNull(branches, "One undecodable branch failed the whole listing.");
+		Assert.IsTrue(branches!.Any(branch => branch.Name == "origin/main" && branch.Tip == _mainTip));
+		Assert.IsTrue(branches!.Any(branch => branch.Name == "origin/feature/ui"));
+		Assert.IsFalse(branches!.Any(branch => branch.Name.Contains("caf", StringComparison.Ordinal)));
+		Assert.HasCount(1, skipped);
+		Assert.Contains("72656673", skipped[0]);
+		Assert.Contains("636166E9", skipped[0]);
 	}
 
 	[TestMethod]

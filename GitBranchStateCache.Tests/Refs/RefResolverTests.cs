@@ -23,6 +23,21 @@ public class RefResolverTests
 		})];
 
 	[TestMethod]
+	public void DecodeLines_DropsOnlyTheLineThatIsNotUtf8()
+	{
+		// One character per byte: "caf\u00e9" is the single byte 0xE9, and "\u00c3\u00a9" is the UTF-8
+		// encoding of é, which must still come through as é.
+		string output = $"{MainTip} refs/heads/main\n{ReleaseTip} refs/heads/caf\u00e9\n{ReleaseTip} refs/heads/caf\u00c3\u00a9\n";
+		List<string> skipped = [];
+
+		string decoded = RefResolver.DecodeLines(output, skipped.Add);
+
+		Assert.AreEqual($"{MainTip} refs/heads/main\n{ReleaseTip} refs/heads/café\n", decoded);
+		Assert.HasCount(1, skipped);
+		Assert.AreEqual("726566732F68656164732F636166E9", skipped[0]);
+	}
+
+	[TestMethod]
 	public void Parse_ReportsBranchesUnderTheRemoteName()
 	{
 		// The mirror keeps branches at refs/heads because that is where a bare mirror puts them. The
