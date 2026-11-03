@@ -45,10 +45,16 @@ public class BranchPatternGitParityTests
 		Git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "--quiet", "--allow-empty", "-m", "initial");
 		string head = Git("rev-parse", "HEAD").Trim();
 
+		// Written straight into packed-refs rather than as loose ref files, so a case-insensitive file
+		// system (macOS, Windows) cannot fold "main" and "Main" into one ref. Unsorted, so the header
+		// does not claim otherwise.
+		StringBuilder packed = new("# pack-refs with: peeled fully-peeled \n");
 		foreach (string name in BranchNames)
 		{
-			Git("update-ref", $"refs/remotes/origin/{name}", head);
+			packed.Append(head).Append(" refs/remotes/origin/").Append(name).Append('\n');
 		}
+
+		File.WriteAllText(Path.Combine(_repository, ".git", "packed-refs"), packed.ToString(), new UTF8Encoding(false));
 	}
 
 	[ClassCleanup]
