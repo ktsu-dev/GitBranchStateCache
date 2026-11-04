@@ -50,6 +50,18 @@ public sealed class GitInvocation
 	/// </remarks>
 	public bool DiscardStandardOutput { get; init; }
 
+	/// <summary>
+	/// Gets whether standard output is returned undecoded, as one character per byte.
+	/// </summary>
+	/// <remarks>
+	/// For a command whose output holds several independent records, any of which may not be UTF-8.
+	/// Strict decoding of the whole output would let one record fail every other one, so the caller
+	/// splits the output into records first and decodes each one itself
+	/// (ktsu-dev/GitBranchStateCache#114). Each character's value is the byte git wrote, so
+	/// <see cref="System.Text.Encoding.Latin1"/> turns the text back into those bytes exactly.
+	/// </remarks>
+	public bool ReadStandardOutputAsBytes { get; init; }
+
 	/// <summary>Gets how long the command may run before it is killed.</summary>
 	public required TimeSpan Timeout { get; init; }
 }

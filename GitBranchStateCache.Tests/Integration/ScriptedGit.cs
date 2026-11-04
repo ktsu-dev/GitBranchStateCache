@@ -3,6 +3,7 @@
 namespace ktsu.GitBranchStateCache.Tests.Integration;
 
 using System.Collections.Concurrent;
+using System.Text;
 using ktsu.GitBranchStateCache.Git;
 using Testably.Abstractions.Testing;
 
@@ -33,6 +34,12 @@ internal sealed class ScriptedGit(MockFileSystem fileSystem) : IGitRunner
 
 	/// <summary>Gets the commits the mirror holds.</summary>
 	public HashSet<string> Commits { get; } = new(StringComparer.Ordinal);
+
+	/// <summary>
+	/// Gets extra <c>for-each-ref</c> lines, one character per byte, for refs whose names are not UTF-8
+	/// and so cannot be held in <see cref="Branches"/>.
+	/// </summary>
+	public List<string> RawRefLines { get; } = [];
 
 	/// <summary>Gets or sets whether an ls-remote succeeds.</summary>
 	public bool AdmitsCredentials { get; set; } = true;
@@ -76,7 +83,7 @@ internal sealed class ScriptedGit(MockFileSystem fileSystem) : IGitRunner
 			"commit-graph" => CommitGraphFails
 				? new GitResult(128, string.Empty, "fatal: could not write commit-graph", TimedOut: false)
 				: Success(string.Empty),
-			"for-each-ref" => Success(ForEachRef()),
+			"for-each-ref" => ForEachRef(invocation),
 			"cat-file" => CatFile(arguments),
 			"merge-base" => MergeBase(arguments),
 			"diff-tree" => Diff(arguments),
@@ -92,6 +99,19 @@ internal sealed class ScriptedGit(MockFileSystem fileSystem) : IGitRunner
 		// once it has finished, so the model has to create it too.
 		fileSystem.Directory.CreateDirectory(arguments[^1]);
 		return Success(string.Empty);
+	}
+
+	private GitResult ForEachRef(GitInvocation invocation)
+	{
+		if (invocation.ReadStandardOutputAsBytes)
+		{
+			return Success(Encoding.Latin1.GetString(Encoding.UTF8.GetBytes(ForEachRef())) + string.Concat(RawRefLines));
+		}
+
+		// What GitRunner's strict decoding does with a byte that is not UTF-8.
+		return RawRefLines.Count > 0
+			? new GitResult(-1, string.Empty, "git produced output that is not valid UTF-8.", TimedOut: false)
+			: Success(ForEachRef());
 	}
 
 	private string ForEachRef() =>

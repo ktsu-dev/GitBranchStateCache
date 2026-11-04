@@ -2,8 +2,11 @@
 
 namespace ktsu.GitBranchStateCache.Refs;
 
+using System.Text;
 using ktsu.GitBranchStateCache.Configuration;
 using ktsu.GitBranchStateCache.Git;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 /// <summary>
@@ -17,9 +20,19 @@ using Microsoft.Extensions.Options;
 /// </remarks>
 /// <param name="runner">Runs git.</param>
 /// <param name="options">The configured options.</param>
-public sealed class RefResolver(IGitRunner runner, IOptions<GitBranchStateCacheOptions> options) : IRefResolver
+/// <param name="logger">Where a skipped ref is reported, or null to report nothing.</param>
+public sealed class RefResolver(
+	IGitRunner runner,
+	IOptions<GitBranchStateCacheOptions> options,
+	ILogger<RefResolver>? logger = null) : IRefResolver
 {
 	private const string HeadPrefix = "refs/heads/";
+
+	private static readonly Encoding StrictUtf8 = new UTF8Encoding(
+		encoderShouldEmitUTF8Identifier: false,
+		throwOnInvalidBytes: true);
+
+	private readonly ILogger _logger = logger ?? NullLogger<RefResolver>.Instance;
 
 	/// <inheritdoc />
 	public async Task<IReadOnlyList<BranchRef>?> ListAsync(string directory, CancellationToken cancellationToken)
@@ -33,6 +46,10 @@ public sealed class RefResolver(IGitRunner runner, IOptions<GitBranchStateCacheO
 				// Reading local refs never touches the network, so the fetch budget would be the wrong
 				// bound for it. Anything slower than a probe here means the volume is in trouble.
 				Timeout = options.Value.ProbeTimeout,
+
+				// git does not require ref names to be UTF-8, and one that is not must not take every
+				// other branch down with it. Each line is decoded on its own below.
+				ReadStandardOutputAsBytes = true,
 			},
 			cancellationToken).ConfigureAwait(false);
 
@@ -41,7 +58,53 @@ public sealed class RefResolver(IGitRunner runner, IOptions<GitBranchStateCacheO
 			return null;
 		}
 
-		return Parse(result.StandardOutput, options.Value.RemoteName);
+		string decoded = DecodeLines(
+			result.StandardOutput,
+			undecodable => RefLog.UndecodableRefSkipped(_logger, directory, undecodable));
+
+		return Parse(decoded, options.Value.RemoteName);
+	}
+
+	/// <summary>
+	/// Decodes <c>for-each-ref</c> output read as bytes, one line at a time, dropping any line that is
+	/// not UTF-8.
+	/// </summary>
+	/// <remarks>
+	/// A name that cannot be decoded cannot be written into a response faithfully either, so the ref
+	/// is skipped rather than served under a name with a replacement character in it, which would look
+	/// fine and match nothing the client has.
+	/// </remarks>
+	/// <param name="output">The output, one character per byte.</param>
+	/// <param name="skipped">Told the hex of each ref name that was dropped.</param>
+	/// <returns>The lines that decoded, each followed by a line feed.</returns>
+	internal static string DecodeLines(string output, Action<string> skipped)
+	{
+		Ensure.NotNull(output);
+		Ensure.NotNull(skipped);
+
+		StringBuilder decoded = new();
+
+		foreach (string line in output.Split('\n'))
+		{
+			if (line.Length == 0)
+			{
+				continue;
+			}
+
+			byte[] bytes = Encoding.Latin1.GetBytes(line);
+
+			try
+			{
+				decoded.Append(StrictUtf8.GetString(bytes)).Append('\n');
+			}
+			catch (DecoderFallbackException)
+			{
+				int separator = Array.IndexOf(bytes, (byte)' ');
+				skipped(Convert.ToHexString(bytes, separator + 1, bytes.Length - separator - 1));
+			}
+		}
+
+		return decoded.ToString();
 	}
 
 	/// <summary>
