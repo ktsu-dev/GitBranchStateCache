@@ -2,6 +2,8 @@
 
 namespace ktsu.GitBranchStateCache.Refs;
 
+using System.Text;
+
 /// <summary>
 /// A branch name pattern, matched the way git matches one.
 /// </summary>
@@ -35,6 +37,14 @@ namespace ktsu.GitBranchStateCache.Refs;
 /// <para>
 /// Matching is case sensitive, because git ref names are.
 /// </para>
+/// <para>
+/// Matching is on the UTF-8 bytes of the pattern and the name, because that is what git's wildmatch
+/// compares. Outside ASCII this is visible: <c>?</c> and a bracket expression each match one byte, so
+/// <c>origin/?</c> does not match <c>origin/é</c> (two bytes) but <c>origin/caf??</c> matches
+/// <c>origin/café</c>, and <c>[é]</c> matches neither byte of an <c>é</c> on its own. That is
+/// surprising, but a pattern a client tried with <c>git branch --list</c> has to pick out the same
+/// branches here (ktsu-dev/GitBranchStateCache#115).
+/// </para>
 /// </remarks>
 public sealed class BranchPattern
 {
@@ -47,7 +57,14 @@ public sealed class BranchPattern
 	/// </remarks>
 	private const int MaximumLength = 512;
 
-	private BranchPattern(string text) => Text = text;
+	/// <summary>The pattern's UTF-8 bytes, one character per byte.</summary>
+	private readonly string _bytes;
+
+	private BranchPattern(string text)
+	{
+		Text = text;
+		_bytes = ToByteString(text);
+	}
 
 	/// <summary>Gets the pattern as the client sent it.</summary>
 	public string Text { get; }
@@ -126,8 +143,22 @@ public sealed class BranchPattern
 	public bool Matches(string branchName)
 	{
 		Ensure.NotNull(branchName);
-		return Matches(Text.AsSpan(), branchName.AsSpan());
+		return Matches(_bytes.AsSpan(), ToByteString(branchName).AsSpan());
 	}
+
+	/// <summary>
+	/// Spells a string as its UTF-8 bytes, one character per byte.
+	/// </summary>
+	/// <remarks>
+	/// The matcher below then compares bytes, as git does, without being rewritten for them. Every
+	/// character it treats specially is ASCII, which UTF-8 leaves as one byte of the same value, and
+	/// every byte of a multi-byte character is above U+007F, so none of them is mistaken for syntax and
+	/// none falls in a POSIX class.
+	/// </remarks>
+	/// <param name="text">The pattern or name.</param>
+	/// <returns>The bytes as characters U+0000 to U+00FF.</returns>
+	private static string ToByteString(string text) =>
+		Encoding.Latin1.GetString(Encoding.UTF8.GetBytes(text));
 
 	/// <summary>
 	/// Matches a pattern against a name.
