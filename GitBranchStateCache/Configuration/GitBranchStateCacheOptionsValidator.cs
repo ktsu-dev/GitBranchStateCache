@@ -167,6 +167,11 @@ public sealed class GitBranchStateCacheOptionsValidator : IValidateOptions<GitBr
 		{
 			failures.Add($"{GitBranchStateCacheOptions.SectionName}:MaxPathsPerRequest must be greater than zero.");
 		}
+
+		if (options.MaxBranchPatternsPerRequest <= 0)
+		{
+			failures.Add($"{GitBranchStateCacheOptions.SectionName}:MaxBranchPatternsPerRequest must be greater than zero.");
+		}
 	}
 
 	private static void RequirePositive(TimeSpan value, string setting, List<string> failures)

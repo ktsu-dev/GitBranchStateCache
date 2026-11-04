@@ -259,6 +259,66 @@ public class StateFlowTests
 	}
 
 	[TestMethod]
+	public async Task Post_State_MoreBranchPatternsThanTheLimit_Is400BeforeAnyFetch()
+	{
+		// Every pattern is matched against every branch, synchronously, so the count has to be
+		// refused before the mirror is cloned or fetched.
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync(new()
+		{
+			["GitBranchStateCache:MaxBranchPatternsPerRequest"] = "3",
+		});
+		Seed(fixture.Git);
+
+		string[] patterns = ["origin/main", "origin/release/*", "origin/a*", "origin/b*"];
+
+		using HttpResponseMessage response = await fixture.Client.SendAsync(
+			StateRequest(JsonSerializer.Serialize(new { @base = ClientBase, branchPatterns = patterns })));
+		JsonElement body = await ReadAsync(response);
+
+		Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+		Assert.Contains("at most 3", body.GetProperty("message").GetString()!);
+		Assert.AreEqual(0, fixture.Git.CountOf("clone"));
+		Assert.AreEqual(0, fixture.Git.CountOf("fetch"));
+	}
+
+	[TestMethod]
+	public async Task Post_State_BranchPatternsAtTheLimit_AreAccepted()
+	{
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync(new()
+		{
+			["GitBranchStateCache:MaxBranchPatternsPerRequest"] = "2",
+		});
+		Seed(fixture.Git);
+
+		string[] patterns = ["origin/main", "origin/release/*"];
+
+		using HttpResponseMessage response = await fixture.Client.SendAsync(
+			StateRequest(JsonSerializer.Serialize(new { @base = ClientBase, branchPatterns = patterns })));
+
+		Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+	}
+
+	[TestMethod]
+	public async Task Get_Branches_MoreBranchPatternsThanTheLimit_Is400()
+	{
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync(new()
+		{
+			["GitBranchStateCache:MaxBranchPatternsPerRequest"] = "1",
+		});
+		Seed(fixture.Git);
+
+		using HttpRequestMessage request = new(
+			HttpMethod.Get,
+			"/v1/github/studio/game.git/branches?pattern=origin/main&pattern=origin/release/*");
+		request.Headers.Authorization = AuthenticationHeaderValue.Parse(Credential);
+
+		using HttpResponseMessage response = await fixture.Client.SendAsync(request);
+
+		Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+		Assert.AreEqual(0, fixture.Git.CountOf("clone"));
+	}
+
+	[TestMethod]
 	[DataRow("HEAD")]
 	[DataRow("main@{1}")]
 	[DataRow("--upload-pack=evil")]

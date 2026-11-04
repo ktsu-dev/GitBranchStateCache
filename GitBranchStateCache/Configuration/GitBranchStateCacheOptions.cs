@@ -124,6 +124,15 @@ public sealed class GitBranchStateCacheOptions
 	public int MaxPathsPerRequest { get; set; } = 20_000;
 
 	/// <summary>
+	/// Gets or sets the most branch patterns one request may name.
+	/// </summary>
+	/// <remarks>
+	/// Every pattern is matched against every branch in the mirror, synchronously, so without a limit
+	/// one request can keep a thread busy for minutes. A request over it is refused before any fetch.
+	/// </remarks>
+	public int MaxBranchPatternsPerRequest { get; set; } = 256;
+
+	/// <summary>
 	/// Gets or sets how long a mirror may go unqueried before it is deleted.
 	/// </summary>
 	/// <remarks>
