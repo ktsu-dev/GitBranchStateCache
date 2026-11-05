@@ -210,6 +210,69 @@ public class GitBranchStateCacheOptionsValidatorTests
 		Assert.IsTrue(Validate(options).Failed);
 	}
 
+	private static void SetTimerSetting(GitBranchStateCacheOptions options, string setting, TimeSpan value)
+	{
+		switch (setting)
+		{
+			case "FetchTimeout":
+				options.FetchTimeout = value;
+				break;
+			case "DiffTimeout":
+				options.DiffTimeout = value;
+				break;
+			case "ProbeTimeout":
+				options.ProbeTimeout = value;
+				break;
+			default:
+				options.MaintenanceInterval = value;
+				break;
+		}
+	}
+
+	[TestMethod]
+	[DataRow("FetchTimeout")]
+	[DataRow("DiffTimeout")]
+	[DataRow("ProbeTimeout")]
+	[DataRow("MaintenanceInterval")]
+	public void Validate_TimerSettingOf49Days_Succeeds(string setting)
+	{
+		GitBranchStateCacheOptions options = Valid();
+		SetTimerSetting(options, setting, TimeSpan.FromDays(49));
+
+		Assert.IsTrue(Validate(options).Succeeded);
+	}
+
+	[TestMethod]
+	[DataRow("FetchTimeout")]
+	[DataRow("DiffTimeout")]
+	[DataRow("ProbeTimeout")]
+	[DataRow("MaintenanceInterval")]
+	public void Validate_TimerSettingOf50Days_Fails(string setting)
+	{
+		// Past uint.MaxValue - 1 ms, CancellationTokenSource, Task.WaitAsync and PeriodicTimer throw, so a
+		// value meant as "effectively no timeout" has to be refused here, naming the setting.
+		GitBranchStateCacheOptions options = Valid();
+		SetTimerSetting(options, setting, TimeSpan.FromDays(50));
+
+		ValidateOptionsResult result = Validate(options);
+
+		Assert.IsTrue(result.Failed);
+		Assert.Contains(setting, result.FailureMessage);
+		Assert.Contains(GitBranchStateCacheOptionsValidator.MaxTimerDuration.ToString(), result.FailureMessage);
+	}
+
+	[TestMethod]
+	public void MaxTimerDuration_IsTheLongestDurationTheTimersAccept()
+	{
+		TimeSpan max = GitBranchStateCacheOptionsValidator.MaxTimerDuration;
+
+		using CancellationTokenSource accepted = new(max);
+		using PeriodicTimer timer = new(max);
+		TimeSpan tooLong = max + TimeSpan.FromMilliseconds(1);
+		Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new CancellationTokenSource(tooLong));
+		Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new PeriodicTimer(tooLong));
+	}
+
 	[TestMethod]
 	public void Validate_ZeroIdleMaxAge_Succeeds()
 	{
