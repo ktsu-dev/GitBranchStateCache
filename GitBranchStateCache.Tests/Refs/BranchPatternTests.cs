@@ -91,6 +91,24 @@ public class BranchPatternTests
 	}
 
 	[TestMethod]
+	public void Matches_BackwardsBracketRange_MatchesItsFirstCharacterAsGitDoes()
+	{
+		// git branch --list '[c-a]' lists c: git's wildmatch compares the first member before it
+		// reads the range, so only the empty range itself matches nothing.
+		BranchPattern pattern = Parse("origin/[c-a]");
+
+		Assert.IsTrue(pattern.Matches("origin/c"));
+		Assert.IsFalse(pattern.Matches("origin/a"));
+		Assert.IsFalse(pattern.Matches("origin/b"));
+
+		BranchPattern negated = Parse("origin/[!c-a]");
+
+		Assert.IsFalse(negated.Matches("origin/c"));
+		Assert.IsTrue(negated.Matches("origin/a"));
+		Assert.IsTrue(negated.Matches("origin/b"));
+	}
+
+	[TestMethod]
 	public void Matches_BracketSet_MatchesAnyMember()
 	{
 		BranchPattern pattern = Parse("origin/[abc]");
