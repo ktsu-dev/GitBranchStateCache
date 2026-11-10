@@ -155,8 +155,12 @@ internal static class Program
 		builder.Configuration.AddInMemoryCollection(overrides);
 		builder.Configuration["Kestrel:Endpoints:Http:Url"] = $"http://*:{port}";
 
+		// Each upstream's list comes whole from one place: the --allow flags, else the highest-precedence
+		// source that sets it. Binding alone would merge the lists by index across sources.
+		Dictionary<string, List<string>> resolvedAllowLists = ResolveAllowLists(builder.Configuration, allowLists);
+
 		builder.Services.AddGitBranchStateCache(builder.Configuration);
-		builder.Services.PostConfigure<GitBranchStateCacheOptions>(options => ReplaceAllowLists(options, allowLists));
+		builder.Services.PostConfigure<GitBranchStateCacheOptions>(options => ReplaceAllowLists(options, resolvedAllowLists));
 
 		// Behind an ingress the request this service sees is not the one the client made. Nothing here
 		// builds a URL from the request, so this exists for the client address in the logs rather than
@@ -313,6 +317,76 @@ internal static class Program
 		}
 
 		return true;
+	}
+
+	/// <summary>
+	/// Works out each upstream's allow-list as one value, taken whole from the source that wins it.
+	/// </summary>
+	/// <remarks>
+	/// Configuration merges arrays by index, so a <c>--config</c> file naming one repository over an
+	/// <c>appsettings.json</c> naming two would bind the file's repository and the second one from
+	/// <c>appsettings.json</c>, silently allowing a repository the operator never named in the file they
+	/// passed. Here the last source that sets any <c>Upstreams:{name}:Repositories</c> entry supplies the
+	/// whole list, and an <c>--allow</c> flag for the upstream beats every source.
+	/// </remarks>
+	/// <param name="configuration">The configuration the options are bound from, with every source added.</param>
+	/// <param name="flagAllowLists">The patterns given for each upstream with <c>--allow</c>.</param>
+	/// <returns>Each upstream's resolved list, for <see cref="ReplaceAllowLists"/>.</returns>
+	internal static Dictionary<string, List<string>> ResolveAllowLists(
+		IConfigurationRoot configuration,
+		IReadOnlyDictionary<string, List<string>> flagAllowLists)
+	{
+		Dictionary<string, List<string>> resolved = new(StringComparer.OrdinalIgnoreCase);
+		string upstreamsPath = $"{GitBranchStateCacheOptions.SectionName}:Upstreams";
+
+		foreach (IConfigurationSection upstream in configuration.GetSection(upstreamsPath).GetChildren())
+		{
+			string repositoriesPath = $"{upstreamsPath}:{upstream.Key}:Repositories";
+
+			foreach (IConfigurationProvider provider in configuration.Providers.Reverse())
+			{
+				List<string> indexes = [.. provider.GetChildKeys([], repositoriesPath).Distinct(StringComparer.OrdinalIgnoreCase)];
+				if (indexes.Count == 0)
+				{
+					continue;
+				}
+
+				// Array entries are keyed by their index; order them as the binder does, numerically.
+				indexes.Sort(CompareIndexes);
+
+				List<string> patterns = [];
+				foreach (string index in indexes)
+				{
+					if (provider.TryGet($"{repositoriesPath}:{index}", out string? pattern) && pattern is not null)
+					{
+						patterns.Add(pattern);
+					}
+				}
+
+				resolved[upstream.Key] = patterns;
+				break;
+			}
+		}
+
+		foreach ((string name, List<string> patterns) in flagAllowLists)
+		{
+			resolved[name] = patterns;
+		}
+
+		return resolved;
+	}
+
+	private static int CompareIndexes(string left, string right)
+	{
+		bool leftIsNumber = int.TryParse(left, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int leftNumber);
+		bool rightIsNumber = int.TryParse(right, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int rightNumber);
+		return (leftIsNumber, rightIsNumber) switch
+		{
+			(true, true) => leftNumber.CompareTo(rightNumber),
+			(true, false) => -1,
+			(false, true) => 1,
+			_ => string.CompareOrdinal(left, right),
+		};
 	}
 
 	/// <summary>
