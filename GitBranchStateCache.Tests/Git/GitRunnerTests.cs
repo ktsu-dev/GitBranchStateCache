@@ -148,7 +148,7 @@ public class GitRunnerTests
 	public void BuildEnvironment_SetsTheFlagsThatKeepARunPredictable()
 	{
 		Dictionary<string, string?> environment = GitRunner.BuildEnvironment(
-			new GitInvocation { Arguments = ["--version"], Timeout = TimeSpan.FromSeconds(1) },
+			new GitInvocation { WorkingDirectory = TempRoot, Arguments = ["--version"], Timeout = TimeSpan.FromSeconds(1) },
 			new GitBranchStateCacheOptions { MirrorRoot = TempRoot },
 			new Hashtable { ["GIT_DIR"] = "/somewhere/inherited", ["PATH"] = "/usr/bin" });
 
@@ -184,16 +184,96 @@ public class GitRunnerTests
 	}
 
 	[TestMethod]
-	public void BuildEnvironment_WithoutAWorkingDirectory_SetsNoCeiling()
+	public void BuildEnvironment_WithoutAWorkingDirectory_PointsGitDirAtNoRepository()
 	{
-		Dictionary<string, string?> environment = GitRunner.BuildEnvironment(
-			new GitInvocation { Arguments = ["--version"], Timeout = TimeSpan.FromSeconds(1) },
-			new GitBranchStateCacheOptions { MirrorRoot = TempRoot },
-			new Hashtable { ["GIT_CEILING_DIRECTORIES"] = "/somewhere/inherited" });
+		GitBranchStateCacheOptions settings = new() { MirrorRoot = TempRoot };
 
-		// Dropped like every other inherited GIT_* variable, and nothing is put in its place.
+		Dictionary<string, string?> environment = GitRunner.BuildEnvironment(
+			new GitInvocation { Arguments = ["ls-remote", "--heads", "https://forge.example/studio/game.git"], Timeout = TimeSpan.FromSeconds(1) },
+			settings,
+			new Hashtable { ["GIT_DIR"] = "/somewhere/inherited", ["GIT_CEILING_DIRECTORIES"] = "/somewhere/inherited" });
+
+		// Such a run inherits this process's current directory, which may be inside a checkout whose
+		// local configuration would otherwise shape it. A GIT_DIR that cannot exist means git
+		// discovers no repository at all (ktsu-dev/GitBranchStateCache#109).
+		Assert.AreEqual(GitRunner.NoRepositoryPath(settings), environment["GIT_DIR"]);
+		Assert.IsTrue(Path.IsPathFullyQualified(environment["GIT_DIR"]!));
+		Assert.IsFalse(Directory.Exists(environment["GIT_DIR"]));
+
 		Assert.IsTrue(environment.TryGetValue("GIT_CEILING_DIRECTORIES", out string? ceiling));
 		Assert.IsNull(ceiling);
+	}
+
+	[TestMethod]
+	public async Task RunAsync_WithoutAWorkingDirectory_IgnoresTheLocalConfigOfARepositoryItWasStartedIn()
+	{
+		// The reproduction from ktsu-dev/GitBranchStateCache#109: a host checkout's local insteadOf
+		// redirects the admission probe's URL to a repository that answers, so a caller is admitted
+		// for a forge it never reached.
+		string root = Path.Combine(TempRoot, $"host-config-{Guid.NewGuid():N}");
+		string answering = Path.Combine(root, "answering.git");
+		string host = Path.Combine(root, "host");
+		const string ForgeUrl = "https://forge.invalid/studio/game.git";
+
+		await Git(root, "init", "--bare", "--quiet", answering);
+		await Git(root, "init", "--quiet", host);
+		await Git(host, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "--allow-empty", "--quiet", "-m", "seed");
+		await Git(host, "push", "--quiet", answering, "HEAD:refs/heads/main");
+		await Git(host, "config", $"url.{new Uri(answering).AbsoluteUri}.insteadOf", ForgeUrl);
+
+		string previous = Environment.CurrentDirectory;
+		GitResult result;
+
+		try
+		{
+			Environment.CurrentDirectory = host;
+			result = await Build().RunAsync(
+				new GitInvocation { Arguments = ["ls-remote", "--heads", ForgeUrl], Timeout = TimeSpan.FromSeconds(30) },
+				CancellationToken.None);
+		}
+		finally
+		{
+			Environment.CurrentDirectory = previous;
+			DeleteTree(root);
+		}
+
+		Assert.AreNotEqual(0, result.ExitCode, $"ls-remote answered through the host's insteadOf: {result.StandardOutput}");
+		Assert.DoesNotContain("refs/heads/main", result.StandardOutput);
+	}
+
+	private static async Task Git(string workingDirectory, params string[] arguments)
+	{
+		Directory.CreateDirectory(workingDirectory);
+		using Process git = Process.Start(new ProcessStartInfo("git", arguments)
+		{
+			WorkingDirectory = workingDirectory,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			Environment =
+			{
+				["GIT_CONFIG_NOSYSTEM"] = "1",
+				["GIT_CONFIG_GLOBAL"] = OnWindows ? "NUL" : "/dev/null",
+				["GIT_TERMINAL_PROMPT"] = "0",
+			},
+		})!;
+		string error = await git.StandardError.ReadToEndAsync();
+		await git.WaitForExitAsync();
+		Assert.AreEqual(0, git.ExitCode, $"git {string.Join(' ', arguments)} failed: {error}");
+	}
+
+	private static void DeleteTree(string path)
+	{
+		if (!Directory.Exists(path))
+		{
+			return;
+		}
+
+		foreach (string file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+		{
+			File.SetAttributes(file, FileAttributes.Normal);
+		}
+
+		Directory.Delete(path, recursive: true);
 	}
 
 	[TestMethod]

@@ -197,6 +197,16 @@ public sealed class GitRunner(IOptions<GitBranchStateCacheOptions> options) : IG
 		{
 			environment["GIT_CEILING_DIRECTORIES"] = ceiling;
 		}
+		else if (invocation.WorkingDirectory is null)
+		{
+			// A run with no working directory (the admission probe, the startup version check) inherits
+			// this process's current directory. A ceiling cannot help there, because git still reads the
+			// directory it starts in, and a service started from inside a checkout would have that
+			// checkout's local configuration (an insteadOf, an extraHeader actions/checkout persisted)
+			// shape the probe that decides admission (ktsu-dev/GitBranchStateCache#109). Pointing GIT_DIR
+			// at a path that cannot be a repository stops discovery outright, and these runs need none.
+			environment["GIT_DIR"] = NoRepositoryPath(settings);
+		}
 
 		ApplyConfigEnvironment(environment, invocation);
 		return environment;
@@ -243,4 +253,16 @@ public sealed class GitRunner(IOptions<GitBranchStateCacheOptions> options) : IG
 	/// </remarks>
 	internal static string GlobalConfigPath(GitBranchStateCacheOptions settings) =>
 		Path.Combine(settings.MirrorRoot, "gitconfig");
+
+	/// <summary>
+	/// Gets the path a run with no working directory is given as its GIT_DIR, so that it finds no repository.
+	/// </summary>
+	/// <remarks>
+	/// Beneath the global configuration path, which is a file or nothing, so no directory can ever exist
+	/// there for git to take as a repository.
+	/// </remarks>
+	/// <param name="settings">The configured options.</param>
+	/// <returns>An absolute path that is never a repository.</returns>
+	internal static string NoRepositoryPath(GitBranchStateCacheOptions settings) =>
+		Path.Combine(Path.GetFullPath(GlobalConfigPath(settings)), "no-repository");
 }

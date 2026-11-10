@@ -185,7 +185,7 @@ This service holds read-only copies of source, which makes it a more attractive 
 - Admission is the only control over who is served, and there is no path through it that admits without a successful upstream call. It does not fail open when the forge is unreachable.
 - The allow-list is checked **before** admission. Reversed, an unlisted repository would still be probed against the forge with the caller's credential before being refused, which would turn this service into an oracle for which repositories a credential can read.
 - A caller's credential never reaches a git command line. It is handed over as configuration through the environment, because on Linux a command line is world readable through `/proc` and an environment block is not, and this process handles many different people's forge credentials.
-- Host git configuration cannot influence a run: system and global configuration are switched off, inherited `GIT_*` variables are dropped, and credential helpers are disabled, so nothing configured for the account this runs as can answer on a caller's behalf.
+- Host git configuration cannot influence a run: system and global configuration are switched off, inherited `GIT_*` variables are dropped, repository discovery cannot reach a checkout the service was started from (so its local configuration is never read), and credential helpers are disabled, so nothing configured for the account this runs as can answer on a caller's behalf.
 
 ## Design notes
 
