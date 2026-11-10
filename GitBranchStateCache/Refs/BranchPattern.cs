@@ -310,7 +310,9 @@ public sealed class BranchPattern
 				break;
 			}
 
-			found |= low <= character && character <= high;
+			// git compares a range's first member literally before it sees the -, so a range written
+			// backwards, such as [c-a], still matches its first character.
+			found |= character == low || (low <= character && character <= high);
 		}
 
 		if (index >= pattern.Length)

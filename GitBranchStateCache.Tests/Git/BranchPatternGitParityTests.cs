@@ -16,7 +16,7 @@ public class BranchPatternGitParityTests
 {
 	private static readonly string[] BranchNames =
 	[
-		"main", "Main", "develop", "release/1.0", "release/2.0", "release-1.0", "release-x", "v1.0", "v1x0",
+		"main", "Main", "develop", "a", "c", "9", "release/1.0", "release/2.0", "release-1.0", "release-x", "v1.0", "v1x0",
 		"v-1", "feature/v1.2", "a]c", "abc", "b", "Z", "7", "_",
 		"é", "café", "cafe", "cafés", "naïve", "😀", "x😀", "日本",
 	];
@@ -31,6 +31,7 @@ public class BranchPatternGitParityTests
 		"origin/café", "origin/caf\\é", "origin/caf*", "origin/*é", "origin/caf[!e]*", "origin/na?ve",
 		"origin/na??ve", "origin/x?", "origin/x????", "origin/[😀]", "origin/日?", "origin/日???",
 		"origin/[[:print:]]", "origin/[[:punct:]]", "origin/[!x]*",
+		"origin/[c-a]", "origin/[9-0]*", "origin/[!c-a]", "origin/[x-a]*", "origin/[_-9]*", "origin/[a-\\-]",
 	];
 
 	private static string _repository = string.Empty;
