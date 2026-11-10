@@ -50,6 +50,9 @@ internal sealed class ScriptedGit(MockFileSystem fileSystem) : IGitRunner
 	/// <summary>Gets or sets whether writing a commit-graph fails.</summary>
 	public bool CommitGraphFails { get; set; }
 
+	/// <summary>Gets or sets whether a clone fails.</summary>
+	public bool CloneFails { get; set; }
+
 	/// <summary>Gets or sets work to run before a given subcommand answers, for concurrency tests.</summary>
 	public Func<GitInvocation, Task>? Before { get; set; }
 
@@ -77,7 +80,9 @@ internal sealed class ScriptedGit(MockFileSystem fileSystem) : IGitRunner
 			"ls-remote" => AdmitsCredentials
 				? Success(string.Empty)
 				: new GitResult(128, string.Empty, "fatal: Authentication failed", TimedOut: false),
-			"clone" => Clone(arguments),
+			"clone" => CloneFails
+				? new GitResult(128, string.Empty, "fatal: repository not found", TimedOut: false)
+				: Clone(arguments),
 			"config" => Success(string.Empty),
 			"fetch" => Success(string.Empty),
 			"commit-graph" => CommitGraphFails

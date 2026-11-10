@@ -45,6 +45,9 @@ internal sealed class ServiceFixture : IAsyncDisposable
 	/// <summary>Gets the clock the service reads.</summary>
 	public FakeTimeProvider Time { get; }
 
+	/// <summary>Gets the service's dependency injection container.</summary>
+	public IServiceProvider Services => _host.Services;
+
 	/// <summary>Gets a client addressed at the service.</summary>
 	public HttpClient Client => _host.GetTestClient();
 

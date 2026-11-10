@@ -63,7 +63,7 @@ public sealed class BranchStateMetrics : IDisposable
 		_branchRequests = _meter.CreateCounter<long>("gitbranchstatecache.branch_requests", unit: RequestUnit, description: "Branch listing requests answered.");
 		_unknownBase = _meter.CreateCounter<long>("gitbranchstatecache.unknown_base", unit: RequestUnit, description: "Requests refused because the mirror does not contain the base commit the client named.");
 		_diffCacheHits = _meter.CreateCounter<long>("gitbranchstatecache.diff_cache_hits", unit: DiffUnit, description: "Diffs answered from the cache because another client shares this merge base.");
-		_diffCacheMisses = _meter.CreateCounter<long>("gitbranchstatecache.diff_cache_misses", unit: DiffUnit, description: "Diffs that had to be computed.");
+		_diffCacheMisses = _meter.CreateCounter<long>("gitbranchstatecache.diff_cache_misses", unit: DiffUnit, description: "Diffs that had to be computed, including those that then failed or timed out.");
 		_diffFailures = _meter.CreateCounter<long>("gitbranchstatecache.diff_failures", unit: DiffUnit, description: "Diffs that failed or timed out, leaving their branch unanswered.");
 		_clones = _meter.CreateCounter<long>("gitbranchstatecache.clones", unit: "{clone}", description: "Mirrors created, each of which is a permanent addition to the volume.");
 		_fetches = _meter.CreateCounter<long>("gitbranchstatecache.fetches", unit: "{fetch}", description: "Incremental fetches performed against an upstream.");
@@ -109,8 +109,16 @@ public sealed class BranchStateMetrics : IDisposable
 	}
 
 	/// <summary>Records a diff that could not be produced.</summary>
+	/// <remarks>
+	/// A failed diff was still a cache miss, and usually the slowest kind. Counting it only as a failure
+	/// would leave it out of the hit/miss ratio, which would then look healthier than it is.
+	/// </remarks>
 	/// <param name="upstream">The upstream key, recorded as a tag.</param>
-	public void RecordDiffFailure(string upstream) => _diffFailures.Add(1, Tag(upstream));
+	public void RecordDiffFailure(string upstream)
+	{
+		_diffCacheMisses.Add(1, Tag(upstream));
+		_diffFailures.Add(1, Tag(upstream));
+	}
 
 	/// <summary>Records a mirror being created.</summary>
 	/// <param name="upstream">The upstream key, recorded as a tag.</param>
