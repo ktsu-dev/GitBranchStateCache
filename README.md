@@ -176,7 +176,7 @@ The volume is sized by the allow-list rather than by traffic, which is what make
 
 ## Instrumentation
 
-A `ktsu.GitBranchStateCache` meter, with no exporter pinned. The pair worth watching is diff cache hits against misses, which reflects how well merge bases are clustering; a low ratio means the team is spread across many integration points and `MaxCachedDiffs` may need raising. The counter worth alerting on is `unknown_base`: every one of those is a client falling back to the local computation this service exists to replace.
+A `ktsu.GitBranchStateCache` meter, with no exporter pinned. The pair worth watching is diff cache hits against misses, which reflects how well merge bases are clustering; a low ratio means the team is spread across many integration points and `MaxCachedDiffs` may need raising. A diff that fails or times out counts as a miss as well as a `diff_failures`, so the ratio includes the slowest diffs. `fetch_duration` times every clone and fetch, including those that fail. The counter worth alerting on is `unknown_base`: every one of those is a client falling back to the local computation this service exists to replace.
 
 ## Security posture
 

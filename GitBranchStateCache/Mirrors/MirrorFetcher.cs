@@ -2,6 +2,7 @@
 
 namespace ktsu.GitBranchStateCache.Mirrors;
 
+using System.Diagnostics;
 using System.IO.Abstractions;
 using ktsu.GitBranchStateCache.Coalescing;
 using ktsu.GitBranchStateCache.Configuration;
@@ -193,12 +194,23 @@ public sealed class MirrorFetcher(
 		using (ticket)
 		{
 			CancellationToken stopping = lifetime.ApplicationStopping;
+			long started = Stopwatch.GetTimestamp();
+			MirrorFetchResult result;
 
-			MirrorFetchResult result = exists
-				? await FetchAsync(key, directory, upstreamBase, authorization, fetchedAt, stopping)
-					.ConfigureAwait(false)
-				: await CloneAsync(key, directory, repositoryUrl, upstreamBase, authorization, stopping)
-					.ConfigureAwait(false);
+			try
+			{
+				result = exists
+					? await FetchAsync(key, directory, upstreamBase, authorization, fetchedAt, stopping)
+						.ConfigureAwait(false)
+					: await CloneAsync(key, directory, repositoryUrl, upstreamBase, authorization, stopping)
+						.ConfigureAwait(false);
+			}
+			finally
+			{
+				// Recorded whatever the outcome. A latency histogram that leaves out the clones and
+				// fetches that failed or timed out would leave out the slowest ones.
+				metrics.RecordFetchDuration(key.Upstream, Stopwatch.GetElapsedTime(started));
+			}
 
 			ticket.Complete(result.Status == MirrorFetchStatus.Current);
 			return result;
