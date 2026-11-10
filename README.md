@@ -93,6 +93,8 @@ Authorization: Basic ...
 
 `paths` is optional; omitting it returns every changed path, which is what a client warming its whole state wants and also how a response becomes enormous. An empty `paths` list asks about no paths: the response still reports each branch, but `paths` comes back empty.
 
+Each entry in `paths` must be in the form git prints: relative to the repository root, with forward slashes, and with no leading `/` or `./`, e.g. `Content/Maps/Foo.umap`. Matching is exact and case-sensitive. A path containing a backslash, starting with `/` or a drive letter (`C:`), or with an empty, `.` or `..` segment gets `400 bad-request` naming it, rather than an answer that would report it as unchanged everywhere.
+
 ```json
 {
   "base": "a1b2c3...",
