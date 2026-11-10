@@ -109,6 +109,53 @@ public class StateFlowTests
 	}
 
 	[TestMethod]
+	[DataRow("Content\\Chars\\Bar.uasset", "backslash")]
+	[DataRow("/Content/Chars/Bar.uasset", "starts with '/'")]
+	[DataRow("./Content/Chars/Bar.uasset", "'.' segment")]
+	[DataRow("Content/../Content/Chars/Bar.uasset", "'..' segment")]
+	[DataRow("Content//Chars/Bar.uasset", "empty segment")]
+	[DataRow("Content/Chars/", "empty segment")]
+	[DataRow("C:/Game/Content/Chars/Bar.uasset", "drive letter")]
+	[DataRow("", "empty")]
+	public async Task Post_State_APathNotInGitsForm_Is400NamingItBeforeAnyFetch(string path, string reason)
+	{
+		// A path git never prints can never match, and would come back as "unchanged on every branch"
+		// with partial false: the silent stale-asset answer. The Unreal plugin on Windows produces
+		// backslashed and absolute paths by default, so these are refused rather than answered.
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync();
+		Seed(fixture.Git);
+
+		string[] paths = ["Content/Maps/Gone.umap", path];
+
+		using HttpResponseMessage response = await fixture.Client.SendAsync(
+			StateRequest(JsonSerializer.Serialize(new { @base = ClientBase, branchPatterns = MainOnly, paths })));
+		JsonElement body = await ReadAsync(response);
+		string message = body.GetProperty("message").GetString()!;
+
+		Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+		Assert.Contains($"'{path}'", message);
+		Assert.Contains(reason, message);
+		Assert.AreEqual(0, fixture.Git.CountOf("clone"));
+		Assert.AreEqual(0, fixture.Git.CountOf("fetch"));
+	}
+
+	[TestMethod]
+	public async Task Post_State_CanonicalPathsWithDotsInNames_AreAccepted()
+	{
+		// Only whole "." and ".." segments are refused; dots inside a name are ordinary characters.
+		await using ServiceFixture fixture = await ServiceFixture.StartAsync();
+		Seed(fixture.Git);
+
+		string[] paths = ["Content/Chars/Bar.uasset", ".github/..config", "Content/a:b"];
+
+		using HttpResponseMessage response = await fixture.Client.SendAsync(
+			StateRequest(JsonSerializer.Serialize(new { @base = ClientBase, branchPatterns = MainOnly, paths })));
+
+		Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+		Assert.IsTrue((await ReadAsync(response)).GetProperty("paths").TryGetProperty("Content/Chars/Bar.uasset", out _));
+	}
+
+	[TestMethod]
 	public async Task Post_State_AnEmptyPathsList_NamesNoPathsButStillReportsTheBranches()
 	{
 		await using ServiceFixture fixture = await ServiceFixture.StartAsync();

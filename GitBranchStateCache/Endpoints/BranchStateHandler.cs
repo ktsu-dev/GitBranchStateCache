@@ -157,6 +157,11 @@ internal sealed class BranchStateHandler(
 			return BadRequest($"'paths' named {request.Paths.Count} paths, and at most {limit} may be sent.");
 		}
 
+		if (!TryValidatePaths(request.Paths, out string? pathFailure))
+		{
+			return BadRequest(pathFailure!);
+		}
+
 		MirrorFetchResult mirror = await fetcher.EnsureCurrentAsync(
 			repository.Key,
 			repository.Directory,
@@ -571,6 +576,76 @@ internal sealed class BranchStateHandler(
 		}
 
 		return true;
+	}
+
+	/// <summary>
+	/// Refuses any requested path that is not in git's form, so it cannot be answered as unchanged.
+	/// </summary>
+	/// <remarks>
+	/// Requested paths are matched exactly against what git diff-tree prints: repository-relative,
+	/// forward slashes, no leading slash or "./". A path in any other form never matches, and would get
+	/// the answer that means "unchanged on every queried branch", which is the silent stale-asset
+	/// failure this service exists to prevent. Refusing beats normalising, because the server cannot
+	/// know what the client's root is.
+	/// </remarks>
+	private static bool TryValidatePaths(IReadOnlyList<string>? requested, out string? failure)
+	{
+		failure = null;
+
+		if (requested is null)
+		{
+			return true;
+		}
+
+		foreach (string? path in requested)
+		{
+			if (DescribeNonGitPath(path) is string reason)
+			{
+				failure = $"'paths' entry '{path}' {reason}. Send repository-relative paths with forward "
+					+ "slashes, as git prints them (for example 'Content/Maps/Foo.umap'); matching is case-sensitive.";
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static string? DescribeNonGitPath(string? path)
+	{
+		if (string.IsNullOrEmpty(path))
+		{
+			return "is empty";
+		}
+
+		if (path.Contains('\\', StringComparison.Ordinal))
+		{
+			return "contains a backslash";
+		}
+
+		if (path[0] == '/')
+		{
+			return "starts with '/'";
+		}
+
+		if (path.Length >= 2 && path[1] == ':' && char.IsAsciiLetter(path[0]))
+		{
+			return "starts with a drive letter";
+		}
+
+		foreach (string segment in path.Split('/'))
+		{
+			if (segment.Length == 0)
+			{
+				return "has an empty segment";
+			}
+
+			if (segment is "." or "..")
+			{
+				return $"has a '{segment}' segment";
+			}
+		}
+
+		return null;
 	}
 
 	private static IReadOnlyList<BranchSummary> Summarize(IReadOnlyList<BranchRef> branches) =>
