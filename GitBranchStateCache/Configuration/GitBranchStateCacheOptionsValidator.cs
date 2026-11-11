@@ -16,6 +16,12 @@ using Microsoft.Extensions.Options;
 /// </remarks>
 public sealed class GitBranchStateCacheOptionsValidator : IValidateOptions<GitBranchStateCacheOptions>
 {
+	/// <summary>
+	/// The longest duration <see cref="CancellationTokenSource"/>, <see cref="Task.WaitAsync(TimeSpan)"/>
+	/// and <see cref="PeriodicTimer"/> accept: <c>uint.MaxValue - 1</c> milliseconds, about 49.7 days.
+	/// </summary>
+	internal static readonly TimeSpan MaxTimerDuration = TimeSpan.FromMilliseconds(uint.MaxValue - 1);
+
 	/// <inheritdoc />
 	public ValidateOptionsResult Validate(string? name, GitBranchStateCacheOptions options)
 	{
@@ -115,10 +121,10 @@ public sealed class GitBranchStateCacheOptionsValidator : IValidateOptions<GitBr
 	{
 		RequirePositive(options.RefsTtl, "RefsTtl", failures);
 		RequirePositive(options.AdmissionTtl, "AdmissionTtl", failures);
-		RequirePositive(options.FetchTimeout, "FetchTimeout", failures);
-		RequirePositive(options.DiffTimeout, "DiffTimeout", failures);
-		RequirePositive(options.ProbeTimeout, "ProbeTimeout", failures);
-		RequirePositive(options.MaintenanceInterval, "MaintenanceInterval", failures);
+		RequirePositiveTimerDuration(options.FetchTimeout, "FetchTimeout", failures);
+		RequirePositiveTimerDuration(options.DiffTimeout, "DiffTimeout", failures);
+		RequirePositiveTimerDuration(options.ProbeTimeout, "ProbeTimeout", failures);
+		RequirePositiveTimerDuration(options.MaintenanceInterval, "MaintenanceInterval", failures);
 
 		// Refs older than the authorization proving they may be read would mean serving state that
 		// outlives the only evidence the caller was ever allowed to see it.
@@ -179,6 +185,25 @@ public sealed class GitBranchStateCacheOptionsValidator : IValidateOptions<GitBr
 		if (value <= TimeSpan.Zero)
 		{
 			failures.Add($"{GitBranchStateCacheOptions.SectionName}:{setting} must be greater than zero.");
+		}
+	}
+
+	/// <summary>
+	/// Requires a setting that is handed to a .NET timer to be positive and within
+	/// <see cref="MaxTimerDuration"/>.
+	/// </summary>
+	/// <remarks>
+	/// Without the upper bound, a value such as <c>365.00:00:00</c> meant as "effectively no timeout"
+	/// passed validation and then threw <see cref="ArgumentOutOfRangeException"/> at startup or on every
+	/// request that needed a fetch or a diff, rather than producing a message naming the setting.
+	/// </remarks>
+	private static void RequirePositiveTimerDuration(TimeSpan value, string setting, List<string> failures)
+	{
+		RequirePositive(value, setting, failures);
+		if (value > MaxTimerDuration)
+		{
+			failures.Add(
+				$"{GitBranchStateCacheOptions.SectionName}:{setting} ({value}) must not exceed {MaxTimerDuration}, the longest timeout .NET timers accept.");
 		}
 	}
 
