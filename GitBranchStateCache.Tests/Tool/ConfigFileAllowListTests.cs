@@ -126,4 +126,36 @@ public class ConfigFileAllowListTests
 			"a/0.git", "a/1.git", "a/2.git", "a/3.git", "a/4.git", "a/5.git",
 			"a/6.git", "a/7.git", "a/8.git", "a/9.git", "a/10.git", "a/11.git");
 	}
+
+	[TestMethod]
+	public void ConfigFile_EmptyList_ReplacesTheAppSettingsListWithNothing()
+	{
+		// An operator who empties an upstream's list in the file they passed should get the startup
+		// error, not whatever list an appsettings.json in the working directory happens to hold.
+		const string Emptied = """{ "GitBranchStateCache": { "Upstreams": { "github": { "Repositories": [] } } } }""";
+
+		GitBranchStateCacheOptions options = Bind([AppSettings, Emptied]);
+
+		AssertRepositories(options, "github");
+	}
+
+	[TestMethod]
+	public void ConfigFile_NullList_ReplacesTheAppSettingsListWithNothing()
+	{
+		const string Nulled = """{ "GitBranchStateCache": { "Upstreams": { "github": { "Repositories": null } } } }""";
+
+		GitBranchStateCacheOptions options = Bind([AppSettings, Nulled]);
+
+		AssertRepositories(options, "github");
+	}
+
+	[TestMethod]
+	public void ConfigFile_ScalarList_ReplacesTheAppSettingsListWithThatOnePattern()
+	{
+		const string Scalar = """{ "GitBranchStateCache": { "Upstreams": { "github": { "Repositories": "studio/game.git" } } } }""";
+
+		GitBranchStateCacheOptions options = Bind([AppSettings, Scalar]);
+
+		AssertRepositories(options, "github", "studio/game.git");
+	}
 }
