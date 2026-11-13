@@ -1,10 +1,8 @@
-## v1.1.4-pre.1 (prerelease)
+## v1.1.4 (patch)
 
 Changes since v1.1.3:
 
-- Bump Testably.Abstractions.FileSystem.Interface from 10.4.0 to 11.0.0 (dependabot[bot])
-- Bump Testably.Abstractions.Testing from 7.2.0 to 8.0.0 (dependabot[bot])
-- Bump MSTest.Sdk from 4.5.2 to 4.5.3 (dependabot[bot])
-- Bump the microsoft group with 1 update (dependabot[bot])
-- Bump the ktsu group with 4 updates (dependabot[bot])
+- Skip an unreadable directory under the mirror root instead of failing every sweep [patch] (#146) (matt-edmondson)
+- Let a --config file empty an upstream's allow-list instead of falling through to appsettings.json [patch] (#147) (matt-edmondson)
+- Read the appsettings.json packed with the tool when it runs from another directory [patch] (#148) (matt-edmondson)
 
