@@ -8,7 +8,9 @@ using ktsu.GitBranchStateCache.Configuration;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 
 /// <summary>
@@ -143,6 +145,8 @@ internal static class Program
 			ApplicationName = "ktsu.GitBranchStateCache",
 		});
 
+		AddPackedAppSettings(builder.Configuration, AppContext.BaseDirectory);
+
 		// Added after the builder's own sources so an explicitly named file beats an appsettings.json
 		// that happens to be in the working directory, and before ApplyDefaults, which reads
 		// configuration to decide what still needs a default and would otherwise not see this file.
@@ -181,6 +185,56 @@ internal static class Program
 
 		await app.RunAsync(cancellationToken).ConfigureAwait(false);
 		return 0;
+	}
+
+	/// <summary>
+	/// Reads the <c>appsettings.json</c> that ships next to the tool, below every source the host
+	/// builder added.
+	/// </summary>
+	/// <remarks>
+	/// The host reads <c>appsettings.json</c> from its content root, which is the working directory. A
+	/// container runs from the directory that holds the file, but a dotnet tool runs from wherever the
+	/// user is, so the packed file was never read and its log levels never applied. It goes in just
+	/// below the working directory's <c>appsettings.json</c>, so that file, the environment and every
+	/// flag still override it as documented.
+	/// </remarks>
+	/// <param name="configuration">The host builder's configuration.</param>
+	/// <param name="toolDirectory">The directory the tool's assemblies and packed files are in.</param>
+	internal static void AddPackedAppSettings(ConfigurationManager configuration, string toolDirectory)
+	{
+		string packed = Path.GetFullPath(Path.Combine(toolDirectory, "appsettings.json"));
+		IList<IConfigurationSource> sources = configuration.Sources;
+
+		int index = 0;
+		for (int i = 0; i < sources.Count; i++)
+		{
+			if (sources[i] is not JsonConfigurationSource { Path: "appsettings.json" } contentRootFile)
+			{
+				continue;
+			}
+
+			// Run from the tool's own directory, that source already reads this file.
+			if (contentRootFile.FileProvider is PhysicalFileProvider provider
+				&& string.Equals(
+					Path.GetFullPath(Path.Combine(provider.Root, "appsettings.json")),
+					packed,
+					OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+			{
+				return;
+			}
+
+			index = i;
+			break;
+		}
+
+		JsonConfigurationSource source = new()
+		{
+			Path = packed,
+			Optional = true,
+			ReloadOnChange = false,
+		};
+		source.ResolveFileProvider();
+		sources.Insert(index, source);
 	}
 
 	/// <summary>
