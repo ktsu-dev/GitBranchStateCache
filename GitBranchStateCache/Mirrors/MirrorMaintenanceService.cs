@@ -214,7 +214,7 @@ public sealed class MirrorMaintenanceService(
 		{
 			// Files belonging to a mirror nested inside this one are counted when that mirror is.
 			return fileSystem.Directory
-				.GetFiles(directory, "*", SearchOption.AllDirectories)
+				.GetFiles(directory, "*", MirrorStore.WholeTree)
 				.Where(file => !nested.Any(inner => MirrorStore.IsInside(file, inner)))
 				.Sum(file => fileSystem.FileInfo.New(file).Length);
 		}

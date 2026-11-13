@@ -3,6 +3,7 @@
 namespace ktsu.GitBranchStateCache.Tests.Mirrors;
 
 using System.Diagnostics.Metrics;
+using System.IO.Abstractions;
 using ktsu.GitBranchStateCache.Coalescing;
 using ktsu.GitBranchStateCache.Configuration;
 using ktsu.GitBranchStateCache.Mirrors;
@@ -26,10 +27,18 @@ public class MirrorMaintenanceServiceTests
 		"gitbranchstatecache-sweep");
 
 	private static (MirrorMaintenanceService Service, MirrorStore Store, MockFileSystem FileSystem, FakeTimeProvider Time)
-		Build(TimeSpan? idleMaxAge = null)
+		Build(TimeSpan? idleMaxAge = null, string? unreadable = null)
 	{
 		MockFileSystem fileSystem = new();
 		fileSystem.Directory.CreateDirectory(Root);
+
+		// What the service sees. The tests seed through the mock directly.
+		IFileSystem seen = fileSystem;
+		if (unreadable is not null)
+		{
+			fileSystem.Directory.CreateDirectory(unreadable);
+			seen = UnreadableDirectoryFileSystem.Wrap(fileSystem, unreadable);
+		}
 
 		FakeTimeProvider time = new(new DateTimeOffset(2026, 8, 19, 9, 47, 0, TimeSpan.Zero));
 		IOptions<GitBranchStateCacheOptions> options = Options.Create(new GitBranchStateCacheOptions
@@ -38,7 +47,7 @@ public class MirrorMaintenanceServiceTests
 			MirrorIdleMaxAge = idleMaxAge ?? TimeSpan.FromDays(30),
 		});
 
-		MirrorStore store = new(fileSystem, options, time);
+		MirrorStore store = new(seen, options, time);
 
 		ServiceCollection services = new();
 		services.AddMetrics();
@@ -46,7 +55,7 @@ public class MirrorMaintenanceServiceTests
 
 		MirrorMaintenanceService service = new(
 			store,
-			fileSystem,
+			seen,
 			new BranchStateMetrics(meterFactory),
 			options,
 			time,
@@ -399,5 +408,38 @@ public class MirrorMaintenanceServiceTests
 		service.Sweep();
 
 		Assert.IsTrue(store.Exists(directory));
+	}
+
+	private static readonly string LostAndFound = Path.Combine(Root, "lost+found");
+
+	[TestMethod]
+	public void Sweep_WithAnUnreadableDirectoryUnderTheRoot_StillReapsIdleMirrorsAndDeadStaging()
+	{
+		// mkfs.ext4 leaves a root-only lost+found at the top of a dedicated volume. A service running
+		// as another user can't list it, and that one directory must not stop every sweep.
+		(MirrorMaintenanceService service, MirrorStore store, MockFileSystem fileSystem, FakeTimeProvider time) =
+			Build(TimeSpan.FromDays(30), LostAndFound);
+
+		string directory = Seed(store, fileSystem, "studio/game.git");
+		store.MarkUsed(directory);
+		string staging = SeedStaging(store, fileSystem, "studio/tools.git", time.GetUtcNow());
+		time.Advance(TimeSpan.FromDays(31));
+
+		service.Sweep();
+
+		Assert.IsFalse(store.Exists(directory));
+		Assert.IsFalse(fileSystem.Directory.Exists(staging));
+	}
+
+	[TestMethod]
+	public void Enumerate_WithAnUnreadableDirectoryUnderTheRoot_FindsTheMirrorsItCanRead()
+	{
+		(_, MirrorStore store, MockFileSystem fileSystem, FakeTimeProvider time) = Build(unreadable: LostAndFound);
+
+		string directory = Seed(store, fileSystem, "studio/game.git");
+		string staging = SeedStaging(store, fileSystem, "studio/tools.git", time.GetUtcNow());
+
+		CollectionAssert.AreEqual(new[] { directory }, store.Enumerate().ToArray());
+		CollectionAssert.AreEqual(new[] { staging }, store.EnumerateStaging().ToArray());
 	}
 }

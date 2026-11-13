@@ -93,6 +93,24 @@ public sealed class MirrorStore(
 	/// <inheritdoc />
 	public DateTimeOffset? LastUsedAt(string directory) => ReadMarker(directory, UsedMarker);
 
+	/// <summary>
+	/// Gets the options for walking the whole mirror root.
+	/// </summary>
+	/// <remarks>
+	/// The <see cref="SearchOption.AllDirectories"/> overloads stop the whole walk at the first
+	/// directory the service can't read, such as the root-only <c>lost+found</c> that
+	/// <c>mkfs.ext4</c> leaves on a dedicated volume, and with it every sweep. Such a directory holds
+	/// nothing this service wrote, so it is skipped instead. Hidden and system directories are still
+	/// walked, as they were before.
+	/// </remarks>
+	internal static EnumerationOptions WholeTree => new()
+	{
+		RecurseSubdirectories = true,
+		IgnoreInaccessible = true,
+		AttributesToSkip = 0,
+		MatchType = MatchType.Simple,
+	};
+
 	/// <inheritdoc />
 	/// <remarks>
 	/// A directory named <c>mirror.git</c> is not necessarily a mirror. Clients send repository paths
@@ -112,7 +130,7 @@ public sealed class MirrorStore(
 			return [];
 		}
 
-		string[] candidates = fileSystem.Directory.GetDirectories(root, MirrorDirectoryName, SearchOption.AllDirectories);
+		string[] candidates = fileSystem.Directory.GetDirectories(root, MirrorDirectoryName, WholeTree);
 
 		return [.. candidates.Where(candidate => !IsRepositoryPathSegment(candidate, candidates))];
 	}
@@ -133,7 +151,7 @@ public sealed class MirrorStore(
 		}
 
 		return [.. fileSystem.Directory
-			.GetDirectories(root, StagingPrefix + "*", SearchOption.AllDirectories)
+			.GetDirectories(root, StagingPrefix + "*", WholeTree)
 			.Where(candidate => IsStagingName(fileSystem.Path.GetFileName(candidate)))];
 	}
 
