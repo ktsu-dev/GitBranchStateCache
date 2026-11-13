@@ -380,8 +380,9 @@ internal static class Program
 	/// Configuration merges arrays by index, so a <c>--config</c> file naming one repository over an
 	/// <c>appsettings.json</c> naming two would bind the file's repository and the second one from
 	/// <c>appsettings.json</c>, silently allowing a repository the operator never named in the file they
-	/// passed. Here the last source that sets any <c>Upstreams:{name}:Repositories</c> entry supplies the
-	/// whole list, and an <c>--allow</c> flag for the upstream beats every source.
+	/// passed. Here the last source that sets any <c>Upstreams:{name}:Repositories</c> entry, or sets the
+	/// list itself to <c>[]</c>, <c>null</c> or a single value, supplies the whole list, and an
+	/// <c>--allow</c> flag for the upstream beats every source.
 	/// </remarks>
 	/// <param name="configuration">The configuration the options are bound from, with every source added.</param>
 	/// <param name="flagAllowLists">The patterns given for each upstream with <c>--allow</c>.</param>
@@ -402,6 +403,15 @@ internal static class Program
 				List<string> indexes = [.. provider.GetChildKeys([], repositoriesPath).Distinct(StringComparer.OrdinalIgnoreCase)];
 				if (indexes.Count == 0)
 				{
+					// An empty or null list, or a single value, is stored at the list's own key with no
+					// entries under it. That source still sets the list, so it wins it rather than
+					// falling through to a source below, and validation then reports it.
+					if (provider.TryGet(repositoriesPath, out string? value))
+					{
+						resolved[upstream.Key] = string.IsNullOrEmpty(value) ? [] : [value];
+						break;
+					}
+
 					continue;
 				}
 
